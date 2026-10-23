@@ -242,6 +242,22 @@ test('counter validation: non-Island lead, duplicated slot, unknown card', () =>
   g.expectError(1, { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'not-a-card', otherLand: 'island' });
 });
 
+test('the land being played cannot pay for a counter-counter', () => {
+  const g = new Game(0);
+  g.claim('p1-slot-00', 'island');
+  g.claim('p1-slot-01', 'forest');
+  g.claim('p0-slot-01', 'island');
+
+  g.play(0, 'p0-slot-00', 'island');
+  g.act(1, { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'p1-slot-01', otherLand: 'forest' });
+  g.expectError(0, { type: 'counter', island: 'p0-slot-01', islandLand: 'island', other: 'p0-slot-00', otherLand: 'island' }, 'not in seat 0');
+  g.expectError(0, { type: 'counter', island: 'p0-slot-00', islandLand: 'island', other: 'p0-slot-01', otherLand: 'island' }, 'not in seat 0');
+
+  const priv = new Map(g.known);
+  const offered = legalActions(g.s, 0, priv).filter((a) => a.type === 'counter');
+  assert.ok(offered.every((a) => a.type === 'counter' && a.island !== 'p0-slot-00' && a.other !== 'p0-slot-00'));
+});
+
 test('play during the respond chain, and cards not in hand, are illegal', () => {
   const g = new Game(0);
   g.claim('p0-slot-01', 'island');

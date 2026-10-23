@@ -290,7 +290,9 @@ function applyCounter(state: GameState, seat: Seat, island: CardId, islandLand: 
   const responder = counterResponder(pending);
   if (seat !== responder) throw new IllegalActionError(`seat ${responder} decides on this land play`);
 
-  const hand = state.players[seat].hand;
+  // The land being played stays in its controller's hand until it resolves, but it
+  // is on the stack: it cannot pay for a counter.
+  const hand = state.players[seat].hand.filter((s) => s.id !== pending.card);
   const islandSlot = findSlot(hand, island);
   const otherSlot = findSlot(hand, otherCard);
   if (!islandSlot) throw new IllegalActionError(`counter card ${island} is not in seat ${seat}'s hand`);
@@ -529,10 +531,11 @@ export function legalActions(state: GameState, seat: Seat, priv?: ReadonlyMap<Ca
       const pending = state.pending;
       if (pending === null || seat !== counterResponder(pending)) return [];
       const draft: Action[] = [{ type: 'allow' }];
-      const island = pickSpendFirstSlot(state.players[seat].hand, 'island', priv);
+      const hand = state.players[seat].hand.filter((s) => s.id !== pending.card); // the played land is on the stack
+      const island = pickSpendFirstSlot(hand, 'island', priv);
       if (island !== undefined) {
         for (const land of LANDS) {
-          const otherCard = pickSpendFirstSlot(state.players[seat].hand, land, priv);
+          const otherCard = pickSpendFirstSlot(hand, land, priv);
           if (otherCard !== undefined && otherCard !== island) {
             draft.push({ type: 'counter', island, islandLand: 'island', other: otherCard, otherLand: land });
           }
