@@ -138,7 +138,7 @@ With no server, the two clients police each other through cryptography and deter
 - **Mental Poker prevents peeking.** Every card in both libraries is encrypted by both players during the shuffle handshake. Drawing a card requires the opponent to send their per-card decryption key for that slot, leaving it locked only by the drawing player's key. Neither player can peek at the opponent's hand or at upcoming cards in either library.
 - **Every reveal is cryptographically verified.** When a card is played, discarded for an Island counter, or revealed by a Swamp, its decryption key is shared and checked against the encrypted deck committed at setup. A player cannot lie about what card was in a slot.
 - **Spend known copies first ("hand shuffle").** If a card in hand is already known to the opponent (returned from the graveyard by Forest, or seen earlier via Swamp) and the player holds another hidden copy of the same land type, playing or discarding that land type automatically spends the already-known copy. On the presence channel, hand hovers and drags send visual hand index rather than card slot ID. Together, this preserves the exact information hiding of shuffling your hand in paper Magic.
-- **Hash chain over the action log.** Every action is appended to a SHA-256 hash chain that both engines step through identically. If the two sides ever disagree on a hash or a key verification fails, the match immediately aborts as invalid.
+- **Hash chain over the action log.** Every action is appended to a SHA-256 hash chain that both engines step through identically. If the two sides ever disagree on a hash, the match is void: nobody can tell who diverged. If a key or reveal fails verification, or the end-of-game audit fails, the peer that sent it forfeits, even if the game had already declared a winner.
 - **End-of-game deck audit.** When a match ends, both players reveal their remaining keys so both clients can verify that each 50-card deck contained the legal 10 copies of each basic land.
 - **Unverifiable claims (disconnects) still need an arbiter.** If a losing player simply closes their tab, proving *who* unplugged requires a third-party witness, which belongs with the deferred recorded-games and ranking work.
 
@@ -148,7 +148,7 @@ With no server, the two clients police each other through cryptography and deter
 - `docs/design/design.md`: board layout, interaction, animation, art direction, the presence signals, rendering approach.
 
 ## Open questions
-- **Reconnect and abandonment.** What happens when a player drops or leaves, given there is no server to hold the game and the transport is a direct peer connection.
+- **Abandonment.** A dropped connection can be resumed by replaying the action log once both players reconnect. A player who never comes back is still unresolved.
 - **NAT failures.** Direct connections fail on some networks, and with no relay those matches simply cannot happen. Needs a clear failure message at minimum.
 - **The cost of the invite flow.** Two copy-pastes is fine for a friend match and friction for anything wider. Deliberately accepted for now.
 

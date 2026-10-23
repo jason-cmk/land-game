@@ -381,5 +381,5 @@ async function cryptoEpilogue(): Promise<void> {
   console.log(`  canonical JSON: ${canonicalJson({ b: 2, a: 1 })}`);
   console.log(`  sha256('land-game'): ${sha256Hex('land-game').slice(0, 16)}…`);
   console.log('');
-  console.log('  Demo complete. Next steps: match/coordinator (real message passing), transport, board.');
+  console.log('  Demo complete. Next steps: WebRTC transport, board.');
 }

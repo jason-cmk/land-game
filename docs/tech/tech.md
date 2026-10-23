@@ -171,7 +171,7 @@ $$E_A(E_B(m)) = E_B(E_A(m))$$
 
 ### 1. Card encoding
 
-Before shuffling, a player's 50-card deck consists of 50 distinct plaintext integers $m_0 \dots m_{49}$, where each $m_k$ encodes `(landType, copyIndex, fixedDomainPadding)` and is derived deterministically as `sha256("land-game/card/v1|deck <seat>|slot <k>|salt <n>|p <prime>")`, taking the first non-zero, non-duplicate result. Because $p$ is prime and $0 < m_k < p$, every value is invertible under the Fermat-based SRA arithmetic — the quadratic-residue construction originally considered here is unnecessary. Having 50 distinct canonical values ensures neither player can stack 11 Islands into their initial deck without being caught at the end-of-game audit.
+Before shuffling, a player's 50-card deck consists of 50 distinct plaintext integers $m_0 \dots m_{49}$, where each $m_k$ encodes `(landType, copyIndex, fixedDomainPadding)` and is derived deterministically as `sha256("land-game/card/v1|deck <seat>|slot <k>|salt <n>|p <prime>")`, taking the first non-zero, non-duplicate result. Because $p$ is prime and $0 < m_k < p$, every value is invertible under the Fermat-based SRA arithmetic. **Known leak (open):** encryption with an odd exponent preserves the Legendre symbol, so each hidden slot's quadratic-residue bit is public and correlates with its land. The standard fix is a safe prime plus canonical values chosen as quadratic residues (e.g. square the hash); see Open questions. Having 50 distinct canonical values ensures neither player can stack 11 Islands into their initial deck without being caught at the end-of-game audit.
 
 ### 2. Two-party shuffle and double-lock (per deck)
 
@@ -208,7 +208,7 @@ When Seat 0 draws slot $i$ (`p0-slot-i`):
 When Seat 0 plays slot $i$, discards it for an Island counter, or reveals it to a Swamp:
 1. Seat 0 includes `CardRevealProof { card: 'p0-slot-i', land, ownerKey: d_{0,i} }` in the action.
 2. Both peers compute $S_0[i]^{d_{0,i}} \bmod p$ and verify that it equals one of the 50 valid canonical card encodings and matches `land`.
-3. If the check fails, the peer cheated and the match aborts immediately.
+3. If the check fails, the peer forfeits (see *Coordinator* below).
 
 ### 5. End-of-game deck audit
 
@@ -219,16 +219,18 @@ When the game enters `phase: 'over'`, both players broadcast all 50 of their per
 ```ts
 interface LogEntry {
   seq: number;                       // 0-based, contiguous
-  actor: Seat | 'system';
-  action: Action | { type: 'start'; deckHash0: string; deckHash1: string };
-  stateHash: string;                 // sha256(canonicalJson(state))
-  prevHash: string;                  // hex, 64 chars; '' for seq 0
-  hash: string;                      // sha256(canonicalJson({ seq, actor, action, stateHash, prevHash }))
+  seat: number;                      // acting seat; -1 for the start entry
+  action: MatchAction | StartRecord; // wire actions, keys included (src/match/protocol.ts)
+  stateHash: string;                 // sha256(canonicalJson(state)) after the action
+  prevHash: string;                  // 'genesis' for seq 0
+  hash: string;                      // sha256(canonicalJson({ seq, seat, action, stateHash, prevHash }))
 }
 ```
 
+Entry 0 is the `start` record: who goes first, both final double-locked decks, and both seats' opening-hand keys. Logging the keys with the actions means the log alone, plus a seat's own secrets, rebuilds that seat's full view.
+
 - Canonical encoding: sorted keys, no whitespace, integers as integers, UTF-8.
-- Because both browsers run the identical `GameState`, every action message includes the sender's new `headHash`. The receiver applies the action locally and compares `headHash`. Any mismatch immediately halts the match as void.
+- Because both browsers run the identical `GameState`, every action message includes the sender's new `headHash`. The receiver applies the action locally and compares `headHash`. Any mismatch voids the match.
 
 ## Protocol
 
@@ -237,18 +239,23 @@ interface LogEntry {
 Reliable, ordered channel:
 
 ```ts
-type Reliable =
-  | { t: 'hello'; protocol: 1; rules: 1; turnCommit: string }
-  | { t: 'helloAck'; protocol: 1; rules: 1; turnCommit: string }
+type Message = // src/match/protocol.ts
+  | { t: 'hello'; protocol: 1; rules: 1; prime: string; turnCommit: string }
   | { t: 'turnReveal'; seed: string }
   | { t: 'shuffleStep'; deckOwner: Seat; step: 'A' | 'B' | 'C' | 'D'; cards: string[] }
-  | { t: 'action'; seq: number; action: Action; headHash: string }
-  | { t: 'audit'; keys: string[] }
-  | { t: 'bye'; reason: 'closed' | 'void' | 'done'; detail?: string };
+  | { t: 'openingKeys'; keys: string[] }               // our keys for the opponent's slots 0-4
+  | { t: 'ready'; headHash: string }                   // hash of log entry 0
+  | { t: 'action'; seq: number; action: MatchAction; headHash: string }
+  | { t: 'resume'; length: number; headHash: string }  // after a reconnect
+  | { t: 'audit'; ownDeck: string[]; otherDeck: string[] }
+  | { t: 'bye'; reason: 'void' | 'forfeit'; detail: string };
 ```
 
-- Who goes first (`activeSeat` on turn 1) is decided before the shuffle by a simple 2-party coin flip (`turnCommit` / `turnReveal`: XOR of two committed random bits).
-- After the 4-step shuffle completes for both decks, the opening 5 draws per player run through `grantDrawKey` actions (`seq: 1..10`), and Turn 1 begins.
+- Both seats send `hello` at once; there is no ack. Both must use the same SRA modulus.
+- Who goes first (`activeSeat` on turn 1) is a 2-party coin flip: `turnCommit = sha256(seed)` in `hello`, then `turnReveal`; first seat is the XOR of the seeds' low bits.
+- Each seat starts step A of its own deck as soon as it has the peer's `hello`; both decks shuffle in parallel.
+- The opening hands are dealt by the engine at `createGame`; their keys travel as `openingKeys` during setup, not as `grantDrawKey` actions, and are recorded in log entry 0.
+- `MatchAction` is the engine `Action` plus keys: `grantDrawKey` carries the granter's per-slot key, and every hidden card a `play`, `counter` or `revealHandForSwamp` makes public carries `{ card, land, ownerKey }`.
 
 Ephemeral, unordered, drop-tolerant channel:
 
@@ -264,6 +271,18 @@ type Ephemeral =
 - Coordinates are normalised 0–1 relative to the board, throttled to ~20 Hz.
 
 ### Transport interface
+
+Implemented so far (`src/transport/types.ts`), reliable channel only, plus an in-memory pair for tests:
+
+```ts
+interface Transport<Message> {
+  send(message: Message): void;
+  onMessage(listener: (message: Message) => void): () => void;
+  close(): void;
+}
+```
+
+Target shape once WebRTC and presence land:
 
 ```ts
 interface MatchTransport {
@@ -282,6 +301,19 @@ Two implementations, chosen at match start:
 
 - **`BroadcastChannelTransport`** — two tabs on one machine, same origin. Development and hotseat testing.
 - **`WebRtcTransport`** — direct peer connection with manual copy/paste SDP signalling (compressed with `CompressionStream('deflate-raw')` and base64url-encoded), using two data channels: `game` (ordered, reliable) and `presence` (`{ ordered: false, maxRetransmits: 0 }`).
+
+## Coordinator (`src/match/coordinator.ts`)
+
+One `MatchCoordinator` per seat runs setup, play and audit over a `Transport`. The board calls `legalActions()` and `submit(action)` with plain engine actions; the coordinator attaches keys, verifies everything the peer sends, and keeps the log.
+
+- **Forced moves are automatic.** Granting a draw key and revealing a hand to Swamp have exactly one legal move, so the coordinator sends them itself.
+- **Failure policy:**
+  - Head hash or sequence mismatch, version or modulus mismatch: **void**. Nobody can tell which side diverged, so there is no result.
+  - Anything that fails verification (bad draw key, bad reveal proof, an action the engine rejects, a duplicate or out-of-range deck value, a failed audit, a malformed message): **the peer forfeits**, even when the game already had a winner. The outcome keeps the failure detail, because a bug in our own code looks the same as tampering.
+  - Either way the coordinator sends `bye`; the receiving side records a void, since it cannot check the claim.
+  - Only the honest browser enforces a forfeit; with no server, a cheating client can display whatever it likes.
+- **Outcome:** a normal finish is final only after the audit passes on both decks.
+- **Reconnect:** `snapshot()` returns the log plus this seat's secrets; the `persist` hook receives one before every action is sent, so a seat's saved log always contains everything it sent. `MatchCoordinator.resume(snapshot, transport)` replays the log through the engine, re-verifying every entry, and `reconnect(transport)` swaps the transport on a live coordinator. Both then send `resume`; the side that is ahead resends the actions the other is missing, and a finished match resends its audit. Setup is not resumable: a drop before log entry 0 means starting again.
 
 ## Migrating to an authoritative server later
 
@@ -312,5 +344,6 @@ index.html
 
 ## Open questions
 
-- **Reconnect.** A dropped peer connection currently means a lost match. Resuming would require re-establishing the WebRTC channel and replaying the log (both peers can keep their keys and log in `sessionStorage`).
+- **Reconnect storage.** Log replay is implemented (see *Coordinator*); where the board keeps snapshots (`sessionStorage`?) and how a new WebRTC channel is re-established are still open. Snapshots contain secrets.
+- **Quadratic-residue leak.** See *Card encoding*. Fix needs a safe prime (RFC 3526 group 14 was the original intent; `generatePrime` makes non-safe primes) and canonical values that are all quadratic residues.
 - **Presence abuse.** Ephemeral messages are unvalidated by nature; clamp coordinates to `0..1` and `index` to `0..hand.length - 1`.
