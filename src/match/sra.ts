@@ -162,21 +162,55 @@ function isProbablePrime(n: bigint, rounds: number, rand: RandomBytes): boolean 
 /**
  * Miller-Rabin probable prime with the top two bits set (so e_{A,i} * e_{B,i}
  * style products stay far below p later — not required, just tidy).
- * Any prime works for SRA; a safe prime is NOT needed because e is drawn
- * coprime to p-1 directly.
+ * NOT suitable as the SRA modulus on its own: use a safe prime (see
+ * generateSafePrime) so encryption leaks nothing about which card is which.
  */
 export function generatePrime(bits: number, rand: RandomBytes): bigint {
   const bytes = Math.ceil(bits / 8);
+  const excess = bytes * 8 - bits; // unused high bits in the first byte
+  const topTwo = 3n << BigInt(bits - 2);
   for (;;) {
     const buf = rand(bytes);
-    // force top two bits and the low bit
-    buf[0]! = (buf[0]! | 0b1100_0000) & 0b1111_1111;
-    buf[bytes - 1]! = buf[bytes - 1]! | 1;
-    const candidate = bytesToBigInt(buf);
-    if (candidate >> BigInt(bits) !== 0n) continue; // overshoot when bits % 8 !== 0
+    buf[0]! = buf[0]! & (0xff >> excess); // clear the unused high bits
+    const candidate = bytesToBigInt(buf) | topTwo | 1n; // force the top two bits and the low bit
     if (isProbablePrime(candidate, 16, rand)) return candidate;
   }
 }
+
+/** Cheap pre-filter: true when n has a small odd factor (and is not that factor). */
+function hasSmallFactor(n: bigint): boolean {
+  for (const small of [3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n, 43n, 47n]) {
+    if (n !== small && n % small === 0n) return true;
+  }
+  return false;
+}
+
+/** True when p and (p - 1) / 2 are both probable primes. */
+export function isSafePrime(p: bigint, rand: RandomBytes): boolean {
+  return p > 5n && isProbablePrime(p, 16, rand) && isProbablePrime((p - 1n) / 2n, 16, rand);
+}
+
+/**
+ * A safe prime p = 2q + 1 (q prime) with the top two bits set. With a safe
+ * prime the quadratic residues form a subgroup of prime order q, so once every
+ * card value is a quadratic residue (canonicalDeckValues), SRA ciphertexts
+ * carry no Legendre-symbol or small-subgroup information about the card.
+ */
+export function generateSafePrime(bits: number, rand: RandomBytes): bigint {
+  for (;;) {
+    const q = generatePrime(bits - 1, rand);
+    const p = 2n * q + 1n;
+    if (hasSmallFactor(p)) continue;
+    if (isProbablePrime(p, 16, rand)) return p;
+  }
+}
+
+/**
+ * The match modulus: a fixed 256-bit safe prime (made with generateSafePrime).
+ * Both peers must use the same modulus. 256 bits is a deliberate choice for a
+ * homebrew game; a larger safe prime drops in here if that ever changes.
+ */
+export const DEFAULT_PRIME = 0xc8622ad692f36fa2f684a5610aac316dd07f2f58354b4f7e5fcd25842060415bn;
 
 // ---------------------------------------------------------------------------
 // Canonical card values
@@ -189,8 +223,12 @@ export const DECK_SIZE = 50;
 
 /**
  * Deterministic plaintext value for (seat, index k). k 0-9 are Forests,
- * 10-19 Islands, and so on. Distinct by construction (salted rehash on the
- * astronomically unlikely collision).
+ * 10-19 Islands, and so on. Each value is the square of a hash, so every card
+ * is a quadratic residue: SRA encryption with an odd exponent preserves the
+ * Legendre symbol, and a mix of residues and non-residues would let anyone
+ * read that bit off a hidden slot. Distinct by construction (salted rehash on
+ * the astronomically unlikely collision); 1 is excluded because it encrypts
+ * to itself.
  */
 export function canonicalDeckValues(seat: 0 | 1, p: bigint): bigint[] {
   const modulusHex = p.toString(16);
@@ -198,9 +236,10 @@ export function canonicalDeckValues(seat: 0 | 1, p: bigint): bigint[] {
   const seen = new Set<bigint>();
   for (let k = 0; k < DECK_SIZE; k++) {
     for (let salt = 0; ; salt++) {
-      const digest = sha256Hex(`land-game/card/v1|deck ${seat}|slot ${k}|salt ${salt}|p ${modulusHex}`);
-      const value = BigInt(`0x${digest}`) % p;
-      if (value !== 0n && !seen.has(value)) {
+      const digest = sha256Hex(`land-game/card/v2|deck ${seat}|slot ${k}|salt ${salt}|p ${modulusHex}`);
+      const root = BigInt(`0x${digest}`) % p;
+      const value = (root * root) % p;
+      if (value > 1n && !seen.has(value)) {
         seen.add(value);
         values.push(value);
         break;

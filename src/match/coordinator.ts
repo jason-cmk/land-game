@@ -53,6 +53,7 @@ import {
   decryptSlot,
   defaultRandomBytes,
   DECK_SIZE,
+  isSafePrime,
   landForIndex,
   shuffled,
   verifyReveal,
@@ -80,7 +81,7 @@ export interface Snapshot {
 
 export interface CoordinatorOptions {
   readonly seat: Seat;
-  /** SRA modulus; both peers must use the same one. */
+  /** SRA modulus: a safe prime, the same on both peers (normally DEFAULT_PRIME). */
   readonly prime: bigint;
   readonly transport: Transport<Message>;
   readonly rand?: RandomBytes;
@@ -144,6 +145,7 @@ export class MatchCoordinator {
     this.peer = other(options.seat);
     this.p = options.prime;
     this.rand = options.rand ?? defaultRandomBytes;
+    if (!isSafePrime(this.p, this.rand)) throw new Error('the SRA modulus must be a safe prime');
     this.persist = options.persist;
     this.transport = options.transport;
     this.mySeed = Array.from(this.rand(16), (b) => b.toString(16).padStart(2, '0')).join('');

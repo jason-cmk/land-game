@@ -20,7 +20,7 @@ import {
   bulkEncrypt,
   canonicalDeckValues,
   decryptSlot,
-  generatePrime,
+  DEFAULT_PRIME,
   landOfPlaintext,
   shuffled,
   verifyReveal,
@@ -314,7 +314,7 @@ await cryptoEpilogue();
 async function cryptoEpilogue(): Promise<void> {
   header('Mental poker epilogue — building P0\u2019s deck with real SRA');
   const rand = bytesOf(mulberry32(4242));
-  const p = generatePrime(256, rand);
+  const p = DEFAULT_PRIME;
   const truth = canonicalDeckValues(0, p); // the referee's ground truth
   console.log(`  modulus: ${p.toString(16).slice(0, 14)}… (${p.toString(16).length * 4} bits)`);
   console.log('  canonical deck: 50 distinct SHA-256-derived values, 10 of each land');

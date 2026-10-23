@@ -16,6 +16,9 @@ import {
   modInverse,
   modPow,
   generatePrime,
+  generateSafePrime,
+  isSafePrime,
+  DEFAULT_PRIME,
   makeKeyPair,
   shuffled,
   verifyReveal,
@@ -76,6 +79,45 @@ test('generatePrime produces odd probable primes of the requested size', () => {
   assert.equal(p % 2n, 1n);
   assert.ok(p >> 254n >= 2n); // top two bits set
   assert.equal(generatePrime(256, seededRandomBytes(1)), p); // deterministic rerun
+});
+
+test('generatePrime honours bit lengths that are not a multiple of 8', () => {
+  for (const bits of [100, 255, 257]) {
+    const p = generatePrime(bits, seededRandomBytes(bits));
+    assert.equal(p.toString(2).length, bits);
+    assert.ok(p >> BigInt(bits - 2) === 3n); // top two bits set
+  }
+});
+
+test('safe primes: DEFAULT_PRIME is a 256-bit safe prime; generateSafePrime makes them', () => {
+  const rand = seededRandomBytes(5);
+  assert.equal(DEFAULT_PRIME.toString(2).length, 256);
+  assert.ok(isSafePrime(DEFAULT_PRIME, rand));
+  const small = generateSafePrime(64, rand);
+  assert.equal(small.toString(2).length, 64);
+  assert.ok(isSafePrime(small, rand));
+  assert.ok(!isSafePrime(23n * 2n + 3n, rand)); // 49: not prime
+  assert.ok(!isSafePrime(13n, rand)); // (13-1)/2 = 6: not prime
+});
+
+/** Euler's criterion: true when x is a quadratic residue mod p. */
+function isResidue(x: bigint, p: bigint): boolean {
+  return modPow(x, (p - 1n) / 2n, p) === 1n;
+}
+
+test('no quadratic-residue leak: every card and every locked slot is a residue', () => {
+  const rand = seededRandomBytes(6);
+  const p = DEFAULT_PRIME;
+  for (const seat of [0, 1] as const) {
+    const canonical = canonicalDeckValues(seat, p);
+    assert.ok(canonical.every((m) => isResidue(m, p) && m > 1n));
+    const a = bulkEncrypt(canonical, p, rand);
+    const b = bulkEncrypt(shuffled(a.cards, rand), p, rand);
+    const c = applyPerSlotLocks(bulkDecrypt(shuffled(b.cards, rand), p, a.key.d), p, rand);
+    const d = applyPerSlotLocks(bulkDecrypt(c.cards, p, b.key.d), p, rand);
+    // Every intermediate and final ciphertext is a residue: the Legendre symbol says nothing.
+    for (const cards of [a.cards, b.cards, c.cards, d.cards]) assert.ok(cards.every((x) => isResidue(x, p)));
+  }
 });
 
 // ---------------------------------------------------------------------------

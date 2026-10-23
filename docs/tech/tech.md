@@ -159,7 +159,7 @@ Non-negotiable inside `engine/`:
 
 ## Mental Poker cryptography (`match/crypto`)
 
-We use the classic **SRA commutative cipher** over a shared 2048-bit safe prime $p$ (where $q = (p - 1) / 2$ is also prime, standard RFC 3526 MODP group), implemented in ~120 lines of vanilla TypeScript using native `BigInt`.
+We use the classic **SRA commutative cipher** over a shared 256-bit safe prime $p$ (where $q = (p - 1) / 2$ is also prime; `DEFAULT_PRIME` in `src/match/sra.ts`), implemented in ~120 lines of vanilla TypeScript using native `BigInt`.
 
 Because modular exponentiation commutes:
 
@@ -171,7 +171,11 @@ $$E_A(E_B(m)) = E_B(E_A(m))$$
 
 ### 1. Card encoding
 
-Before shuffling, a player's 50-card deck consists of 50 distinct plaintext integers $m_0 \dots m_{49}$, where each $m_k$ encodes `(landType, copyIndex, fixedDomainPadding)` and is derived deterministically as `sha256("land-game/card/v1|deck <seat>|slot <k>|salt <n>|p <prime>")`, taking the first non-zero, non-duplicate result. Because $p$ is prime and $0 < m_k < p$, every value is invertible under the Fermat-based SRA arithmetic. **Known leak (open):** encryption with an odd exponent preserves the Legendre symbol, so each hidden slot's quadratic-residue bit is public and correlates with its land. The standard fix is a safe prime plus canonical values chosen as quadratic residues (e.g. square the hash); see Open questions. Having 50 distinct canonical values ensures neither player can stack 11 Islands into their initial deck without being caught at the end-of-game audit.
+Before shuffling, a player's 50-card deck consists of 50 distinct plaintext integers $m_0 \dots m_{49}$, where each $m_k$ encodes `(landType, copyIndex, fixedDomainPadding)` and is derived deterministically as $h^2 \bmod p$ with $h$ = `sha256("land-game/card/v2|deck <seat>|slot <k>|salt <n>|p <prime>")`, taking the first result that is greater than 1 and not a duplicate (1 is excluded because it encrypts to itself). Because $p$ is prime and $0 < m_k < p$, every value is invertible under the Fermat-based SRA arithmetic.
+
+**Why squares and a safe prime.** Encrypting with an odd exponent preserves the Legendre symbol, so if card values were a mix of quadratic residues and non-residues, anyone could read that bit off a hidden slot, and it correlates with the land. Squaring makes every card a residue, and with a safe prime the residues form a subgroup of prime order $q$, so no other small-subgroup character leaks either. The coordinator refuses a modulus that is not a safe prime.
+
+**Key size.** 256 bits is a deliberate choice for a homebrew game: setup is about 600 modular exponentiations in pure-BigInt JS, and a 2048-bit modulus would make it noticeably slow. A larger safe prime can replace `DEFAULT_PRIME` later without protocol changes. Having 50 distinct canonical values ensures neither player can stack 11 Islands into their initial deck without being caught at the end-of-game audit.
 
 ### 2. Two-party shuffle and double-lock (per deck)
 
@@ -345,5 +349,4 @@ index.html
 ## Open questions
 
 - **Reconnect storage.** Log replay is implemented (see *Coordinator*); where the board keeps snapshots (`sessionStorage`?) and how a new WebRTC channel is re-established are still open. Snapshots contain secrets.
-- **Quadratic-residue leak.** See *Card encoding*. Fix needs a safe prime (RFC 3526 group 14 was the original intent; `generatePrime` makes non-safe primes) and canonical values that are all quadratic residues.
 - **Presence abuse.** Ephemeral messages are unvalidated by nature; clamp coordinates to `0..1` and `index` to `0..hand.length - 1`.

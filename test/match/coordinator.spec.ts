@@ -9,7 +9,7 @@ import { MatchCoordinator } from '../../src/match/coordinator.ts';
 import type { Snapshot } from '../../src/match/coordinator.ts';
 import type { Message } from '../../src/match/protocol.ts';
 import { verifyChain, stateHashOf } from '../../src/match/log.ts';
-import { generatePrime } from '../../src/match/sra.ts';
+import { DEFAULT_PRIME, generatePrime } from '../../src/match/sra.ts';
 import type { RandomBytes } from '../../src/match/sra.ts';
 import { createMemoryPair } from '../../src/transport/memory.ts';
 import type { Transport } from '../../src/transport/types.ts';
@@ -36,8 +36,7 @@ function seededRandomBytes(seed: number): RandomBytes {
   };
 }
 
-// A small modulus keeps the tests fast; the protocol is size-independent.
-const PRIME = generatePrime(256, seededRandomBytes(1));
+const PRIME = DEFAULT_PRIME;
 
 /** Let every queued message (and the replies it triggers) be delivered. */
 function settle(): Promise<void> {
@@ -322,6 +321,14 @@ test('a peer that drops mid-audit can still finish after reconnecting', async ()
   await settle();
   assert.equal(c0.outcome?.kind, 'win');
   assert.deepEqual(c0.outcome, c1.outcome);
+});
+
+test('a modulus that is not a safe prime is refused', () => {
+  const [t0] = createMemoryPair<Message>();
+  assert.throws(
+    () => new MatchCoordinator({ seat: 0, prime: generatePrime(256, seededRandomBytes(1)), transport: t0 }),
+    /safe prime/,
+  );
 });
 
 test('setup cannot be resumed', async () => {
