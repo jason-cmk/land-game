@@ -10,3 +10,20 @@ export interface Transport<Message> {
   /** Stop sending and delivering, in both directions. */
   close(): void;
 }
+
+export type TransportStatus = 'open' | 'disconnected' | 'closed';
+
+/**
+ * A real peer link: the reliable game channel plus an unreliable, unordered
+ * presence channel for cosmetic signals (hover, drag). Presence messages may
+ * be dropped and never delay game messages.
+ */
+export interface PeerTransport<Message, Presence> extends Transport<Message> {
+  /** 0 for the inviter, 1 for the joiner. */
+  readonly seat: 0 | 1;
+  /** Best effort: dropped while the link is not open. */
+  sendPresence(presence: Presence): void;
+  onPresence(listener: (presence: Presence) => void): () => void;
+  /** 'disconnected' may recover on its own; 'closed' is final. */
+  onStatus(listener: (status: TransportStatus) => void): () => void;
+}

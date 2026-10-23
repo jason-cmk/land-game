@@ -276,35 +276,33 @@ type Ephemeral =
 
 ### Transport interface
 
-Implemented so far (`src/transport/types.ts`), reliable channel only, plus an in-memory pair for tests:
+`src/transport/types.ts`. The coordinator needs only the reliable channel; real links add presence and status:
 
 ```ts
 interface Transport<Message> {
-  send(message: Message): void;
-  onMessage(listener: (message: Message) => void): () => void;
+  send(message: Message): void;                                   // dropped once closed
+  onMessage(listener: (message: Message) => void): () => void;    // in send order
   close(): void;
+}
+
+interface PeerTransport<Message, Presence> extends Transport<Message> {
+  readonly seat: 0 | 1;                                           // 0 inviter, 1 joiner
+  sendPresence(presence: Presence): void;                         // best effort
+  onPresence(listener: (presence: Presence) => void): () => void;
+  onStatus(listener: (status: 'open' | 'disconnected' | 'closed') => void): () => void;
 }
 ```
 
-Target shape once WebRTC and presence land:
+Implementations:
 
-```ts
-interface MatchTransport {
-  readonly seat: Seat; // 0 for inviter, 1 for joiner
-  open(): Promise<void>;
-  send(msg: Reliable): void;
-  sendEphemeral(msg: Ephemeral): void;
-  onMessage(cb: (m: Reliable) => void): () => void;
-  onEphemeral(cb: (m: Ephemeral) => void): () => void;
-  onStatus(cb: (s: TransportStatus) => void): () => void;
-  close(): void;
-}
-```
+- **`createMemoryPair`** (`memory.ts`): `Transport` only, for tests. Async delivery, structured-cloned messages.
+- **`connectBroadcast(room, seat)`** (`broadcast.ts`): two tabs on one machine, same origin, over `BroadcastChannel`. Development and hotseat play. Resolves once each tab has heard the other's hello; an open tab always acknowledges a fresh hello, so a reloaded tab can rejoin. Closing a tab sends `bye`, which closes the other end.
+- **`createInvite()` / `joinInvite(code)`** (`webrtc.ts`): direct WebRTC with manual copy-paste signalling. The inviter's invite code goes to the joiner, whose reply code comes back to `invite.accept(code)`. ICE is not trickled: each side waits for gathering to finish (5 s cap) so one paste each way carries every candidate. Two pre-negotiated channels (ids 0 and 1, so no in-band channel handshake): `game` (ordered, reliable) and `presence` (`{ ordered: false, maxRetransmits: 0 }`). Payloads are JSON; anything else from the peer is dropped. `failed` or `closed` connection states close the transport; `disconnected` is reported and may recover.
+- **Signalling codes** (`signal.ts`): `LG1.` + base64url of `deflate-raw`-compressed JSON `{ type, sdp }`. Whitespace is ignored on paste; pasting the wrong kind of code gets a specific message.
+- **ICE servers:** default is one public STUN server (`stun:stun.l.google.com:19302`), configurable. STUN sees connection metadata only, never game traffic. There is no TURN relay, so strict NATs still fail.
+- **Reconnect over WebRTC** needs a fresh invite/reply exchange, then `coordinator.reconnect(newTransport)`.
 
-Two implementations, chosen at match start:
-
-- **`BroadcastChannelTransport`** — two tabs on one machine, same origin. Development and hotseat testing.
-- **`WebRtcTransport`** — direct peer connection with manual copy/paste SDP signalling (compressed with `CompressionStream('deflate-raw')` and base64url-encoded), using two data channels: `game` (ordered, reliable) and `presence` (`{ ordered: false, maxRetransmits: 0 }`).
+`RTCPeerConnection` is reached through small structural types, so the module typechecks without DOM types and tests inject a fake (`test/transport/fake-webrtc.ts`). Node has no WebRTC, so the real browser path is still unverified.
 
 ## Coordinator (`src/match/coordinator.ts`)
 

@@ -14,7 +14,8 @@ Read these before changing behaviour. The spec is the source of truth; anything 
 ## Layout
 
 - `src/engine/`: pure rules engine
-- `src/match/`: hash chain log, SRA deck protocol, match helpers
+- `src/match/`: hash chain log, SRA deck protocol, lockstep coordinator
+- `src/transport/`: transport interface, in-memory pair, BroadcastChannel, WebRTC
 - `test/`: `node:test` specs
 - `demo/demo.ts`: CLI demo of a scripted match
 
