@@ -11,6 +11,8 @@ import { connectBroadcast } from '../transport/broadcast.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
 import type { PeerTransport } from '../transport/types.ts';
 import { dropOutcome, promptFor } from './controls.ts';
+import { counterChain } from './chain.ts';
+import type { ChainStep } from './chain.ts';
 import { cuesBetween } from './effects.ts';
 import { dragMessage, hoverMessage, hoveredCard, peerCursor, peerDrag } from './presence.ts';
 import type { Presence } from './presence.ts';
@@ -215,7 +217,14 @@ function play(link: Link, snapshotKey: string | null): void {
     const cues = shown === null || shown === state ? [] : cuesBetween(shown, state);
     shown = state;
     if (cues.length > 0) lastCues = cues.map((c) => c.kind);
-    table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights }, cues);
+    const steps = coordinator.log.map((entry): ChainStep => {
+      const action = entry.action;
+      if (action.type === 'play') return { kind: 'play' };
+      if (action.type === 'counter') return { kind: 'counter', link: { seat: entry.seat as Seat, cards: [action.island.card, action.other.card] } };
+      return { kind: 'other' };
+    });
+    const chain = counterChain(state, steps);
+    table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights, chain }, cues);
 
     status.textContent = statusText(prompt) + (error ? ` (${error})` : '');
     const addButton = (label: string, onClick: () => void, quiet = false): void => {

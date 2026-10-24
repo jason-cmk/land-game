@@ -22,6 +22,7 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Board: presence (hover, cursor, drag) | `src/board/presence.ts` | Done |
 | Board: drag-to-play | `src/board/table.ts`, `controls.ts` | Done |
 | Board: card art (code-drawn, baked textures) | `src/board/art.ts` | First pass |
+| Board: counter-chain display | `src/board/chain.ts`, `table.ts` | Done |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -38,20 +39,21 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Presence**: hovering a card shows it to the opponent (cyan glow, card leans in) and your pointer appears on their side. Hidden hand cards travel as an index into a locally shuffled hand order, never a slot id; incoming presence is validated. Verified between two headless Chrome tabs.
 - **Drag-to-play**: playable cards can be dragged as well as clicked. Drop on a target, on the table, or back on the hand; what a drop does comes from a pure, unit-tested `dropOutcome` in `controls.ts`. The opponent sees the dragged card follow your pointer (`dragHand`/`dragBoard` presence). `npm run smoke` now plays about a third of its cards by real mouse drags and fails if the opponent never sees one; a separate headless check confirmed a drag dropped straight onto a Forest target, and a drop back on the hand changing nothing.
 - **Card art**: MTG-style basic land faces (name bar, landscape, type line, mana symbol) and an abstract card back with the five land colours, drawn in code (`src/board/art.ts`) and baked into textures at mount. Revealed hand cards get a rim and an eye badge.
+- **Counter chain**: paid pairs stay beside the play, numbered and labelled by payer, with what allowing would do now; rebuilt from the log (`chain.ts`, unit-tested) so it survives reloads. Checked in headless Chrome with a two-counter chain.
 - **Coordinator fix found in the browser**: an exception in an `onChange` listener was caught by the message handler and treated as the peer failing verification, so a UI bug forfeited the match. Listener errors now go to `onListenerError` (default: rethrown on a fresh task).
-- **Tests**: 106 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
+- **Tests**: 109 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Tooling**: `npm run dev` (Vite), `npm run build`, `npm run typecheck` (two configs: no-DOM layers, DOM board), `npm test`, `npm run demo`, `npm run smoke` (headless-Chrome play-through of the board). Node 24 type stripping; one runtime dependency (PixiJS).
 
 ## Not done
 
-1. **Board polish**: effect tuning, a clearer counter-chain display, Swamp reveal moment.
+1. **Board polish**: effect tuning, Swamp reveal moment.
 2. **WebRTC reconnect UI**: a dropped online match needs a fresh invite/reply exchange, then `coordinator.reconnect()`; there is no UI for it yet.
 3. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
 
 ## Next step
 
-Board polish: pick from the list above. A clearer counter chain is the most visible gap.
+Pick from the list above: the WebRTC reconnect UI is the main gap before real remote play; effect tuning and the Swamp reveal moment are polish.
 
 ## Open items and risks
 

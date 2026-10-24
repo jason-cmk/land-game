@@ -8,6 +8,8 @@ import type { Texture } from 'pixi.js';
 import type { CardId, CardSlot, GameState, Land, Seat } from '../engine/types.ts';
 import { other } from '../engine/types.ts';
 import { CARD_H, CARD_W, drawBack, drawFace } from './art.ts';
+import type { ChainLink } from './chain.ts';
+import { chainOutcome } from './chain.ts';
 import type { Cue } from './effects.ts';
 import { playCues } from './fx.ts';
 import { nextHandOrder } from './presence.ts';
@@ -21,6 +23,8 @@ export interface TableView {
   /** Lands this seat privately knows (its own hidden hand cards). */
   readonly privateHand: ReadonlyMap<CardId, Land>;
   readonly highlights: ReadonlyMap<CardId, Highlight>;
+  /** Counters paid against the pending play, oldest first (see chain.ts). */
+  readonly chain: readonly ChainLink[];
 }
 
 const PEER_COLOUR = 0x7fdcff;
@@ -326,6 +330,7 @@ export class Table {
       });
     };
 
+    const onStack = new Set(view.chain.flatMap((link) => link.cards));
     const margin = 24 * scale;
     const sideW = cardW * 2.2;
     for (const seat of [them, me]) {
@@ -341,14 +346,16 @@ export class Table {
       row(hand, handY, sideW, width - sideW, handFace, (s) => s.land !== null);
       row(p.battlefield, fieldY, sideW, width - sideW, (s) => s.land, () => false);
       // Graveyard on the left of the field row, small and fanned; library on the right as a pile.
-      row(p.graveyard, fieldY, margin, sideW - margin, (s) => s.land, () => false, 0.6);
+      // Cards paying for a counter sit in the middle until the chain ends, not in the graveyard yet.
+      const graveyard = p.graveyard.filter((s) => !onStack.has(s.id));
+      row(graveyard, fieldY, margin, sideW - margin, (s) => s.land, () => false, 0.6);
       p.library.forEach((slot, i) => {
         const lift = Math.min(i, 12) * 0.6;
         places.set(slot.id, { x: width - sideW / 2, y: handY - lift, scale: scale * 0.8, face: null, revealed: false, highlight: 'none', peer: false, z: i });
       });
       // Label on the table side of the pile, so it never falls off the edge.
       this.text(`Deck ${p.library.length}`, width - sideW / 2, handY + (mine ? -1 : 1) * cardW * 0.85, scale);
-      this.text(`Graveyard ${p.graveyard.length}`, sideW / 2, fieldY + cardW * 0.65, scale);
+      this.text(`Graveyard ${graveyard.length}`, sideW / 2, fieldY + cardW * 0.65, scale);
     }
 
     // The land being played sits in the middle until the counter chain ends.
@@ -364,7 +371,7 @@ export class Table {
         peer: false,
         z: 100,
       });
-      if (pending.counters > 0) this.text(`${pending.counters} counter${pending.counters === 1 ? '' : 's'}`, width / 2 + cardW * 1.1, rowY(2), scale);
+      this.chainLayout(view, places, { width, y: rowY(2), rowH, cardW, scale });
     }
 
     for (const [id, place] of places) {
@@ -446,8 +453,50 @@ export class Table {
     return best?.id ?? null;
   }
 
-  private text(content: string, x: number, y: number, scale: number): void {
-    const label = new Text({ text: content, style: { fontFamily: 'system-ui, sans-serif', fontSize: 13 * scale, fill: 0xcfd8cf } });
+  /**
+   * The counter chain beside the pending play: each paid pair alternates right
+   * and left of it (first counter on the right), leaning toward the payer's
+   * side, numbered and labelled by who paid. Under the play: what allowing it now would do.
+   */
+  private chainLayout(view: TableView, places: Map<CardId, Place>, at: { width: number; y: number; rowH: number; cardW: number; scale: number }): void {
+    const { width, y, rowH, cardW, scale } = at;
+    const centre = width / 2;
+    const small = 0.85;
+    const w = cardW * small;
+    const pairW = w * 1.55;
+    const gap = 24 * scale;
+    const slots = Math.ceil(view.chain.length / 2);
+    const room = centre - cardW * 0.6 - gap - 24 * scale; // from the play's edge to the screen edge
+    const step = slots <= 1 ? 0 : Math.min(pairW + gap, (room - pairW) / (slots - 1));
+    view.chain.forEach((link, i) => {
+      const side = i % 2 === 0 ? 1 : -1;
+      const x = centre + side * (cardW * 0.6 + gap + pairW / 2 + Math.floor(i / 2) * step);
+      const py = y + (link.seat === view.seat ? 1 : -1) * rowH * 0.1;
+      link.cards.forEach((id, j) => {
+        const slot = view.state.players[link.seat].graveyard.find((s) => s.id === id);
+        places.set(id, {
+          x: x + (j === 0 ? -1 : 1) * w * 0.28,
+          y: py + (j === 0 ? -1 : 1) * 3 * scale,
+          scale: scale * small,
+          face: slot?.land ?? null,
+          revealed: false,
+          highlight: 'none',
+          peer: false,
+          z: 50 + i * 2 + j,
+        });
+      });
+      const labelY = py + (link.seat === view.seat ? 1 : -1) * (cardW * small * 0.85 + 4 * scale);
+      this.text(`${i + 1}. ${link.seat === view.seat ? 'Your' : 'Their'} counter`, x, labelY, scale, link.seat === view.seat ? 0xbfe3ff : 0xffc9b8);
+    });
+    const outcome = chainOutcome(view.state);
+    if (outcome !== null && view.state.pending!.counters > 0) {
+      const text = outcome === 'resolves' ? 'Resolves if allowed' : 'Countered if allowed';
+      this.text(text, centre, y + cardW * 1.15 * 0.85 + 6 * scale, scale, outcome === 'resolves' ? 0xa8e6a1 : 0x8cc4ff);
+    }
+  }
+
+  private text(content: string, x: number, y: number, scale: number, colour = 0xcfd8cf): void {
+    const label = new Text({ text: content, style: { fontFamily: 'system-ui, sans-serif', fontSize: 13 * scale, fill: colour } });
     label.anchor.set(0.5);
     label.position.set(x, y);
     this.labels.addChild(label);
