@@ -107,12 +107,14 @@ export async function createInvite<Message, Presence>(options: WebRtcOptions & {
   const transport = new WebRtcTransport<Message, Presence>(seat, pc);
   try {
     await pc.setLocalDescription(await pc.createOffer());
-    const code = await encodeSignal({ ...(await gathered(pc, options)), seat, ...(match === undefined ? {} : { match }) });
+    const offer = await gathered(pc, options);
+    const code = await encodeSignal({ ...offer, seat, ...(match === undefined ? {} : { match }) });
     return {
       code,
       accept: async (replyCode) => {
         const answer = await decodeSignal(replyCode, 'answer');
         checkMatch(match, answer.match);
+        transport.session = { offer: offer.sdp, answer: answer.sdp };
         await pc.setRemoteDescription(answer);
         await transport.opened;
         return transport;
@@ -140,7 +142,9 @@ export async function joinInvite<Message, Presence>(inviteCode: string, options:
   try {
     await pc.setRemoteDescription(offer);
     await pc.setLocalDescription(await pc.createAnswer());
-    const code = await encodeSignal({ ...(await gathered(pc, options)), ...(match === undefined ? {} : { match }) });
+    const answer = await gathered(pc, options);
+    transport.session = { offer: offer.sdp, answer: answer.sdp };
+    const code = await encodeSignal({ ...answer, ...(match === undefined ? {} : { match }) });
     return { code, transport: transport.opened.then(() => transport) };
   } catch (err) {
     transport.close();
@@ -188,6 +192,11 @@ export class WebRtcTransport<Message, Presence> implements PeerTransport<Message
   private readonly statusListeners = new Set<(status: TransportStatus) => void>();
   private closed = false;
   readonly seat: 0 | 1;
+  /**
+   * The offer and answer this link was made from, once both are known; their
+   * DTLS fingerprints let both players check nothing sits between them.
+   */
+  session: { readonly offer: string; readonly answer: string } | null = null;
   private readonly pc: PeerConnectionLike;
 
   constructor(seat: 0 | 1, pc: PeerConnectionLike) {

@@ -1,6 +1,6 @@
 # Progress
 
-Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile, card info, history, effect polish, layer enforcement, turn indicator, targeting arrow, tilt, single-player).
+Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile, card info, history, effect polish, layer enforcement, turn indicator, targeting arrow, tilt, single-player, room codes).
 
 ## Picking up on another machine
 
@@ -14,10 +14,10 @@ Paused on 2026-10-24 with everything merged to `main` and pushed to `github.com/
    ```
 2. **Check it works.** All four should pass:
    - `npm run typecheck`
-   - `npm test`: 136 tests
+   - `npm test`: 144 tests
    - `npm run demo`
-   - `npm run smoke`: drives the board in headless Chrome (a two-tab match, a reload, then WebRTC with a forced drop and a reload, then a phone-sized touch tab against a desktop tab, then a full match against the computer and one reloaded mid-game). It needs Google Chrome or Chromium; the default path is the macOS one, so elsewhere set `CHROME_PATH` (e.g. `/usr/bin/chromium` on the Arch server). It picks two free ports per run (so runs in parallel worktrees don't collide), closes each phase's tabs before the next, and writes screenshots to `smoke-output/` (gitignored). Run one at a time on a small machine: every open board renders continuously.
-3. **Play it.** `npm run dev`, then open http://localhost:5173 and click *Play the computer*. For two players, open it in two tabs, enter the same room in both and take seat 1 and seat 2. For online play, one player clicks *Create an invite*, the other pastes it and sends back the reply code.
+   - `npm run smoke`: drives the board in headless Chrome (a two-tab match, a reload, then WebRTC with a forced drop and a reload, then two tabs meeting by room code and reconnecting on their own, then a phone-sized touch tab against a desktop tab, then a full match against the computer and one reloaded mid-game). It needs Google Chrome or Chromium; the default path is the macOS one, so elsewhere set `CHROME_PATH` (e.g. `/usr/bin/chromium` on the Arch server). It picks two free ports per run (so runs in parallel worktrees don't collide), closes each phase's tabs before the next, and writes screenshots to `smoke-output/` (gitignored). Run one at a time on a small machine: every open board renders continuously.
+3. **Play it.** `npm run dev`, then open http://localhost:5173 and click *Play the computer*. For two players, open it in two tabs, enter the same room in both and take seat 1 and seat 2. For online play, one player clicks *Create a room* and the other types its code (the copy-paste codes are folded below).
 4. **Read before changing behaviour:** `AGENT.md`, then `spec.md` (source of truth), `tech.md`, `design.md`.
 
 Working notes:
@@ -26,7 +26,8 @@ Working notes:
 - **Browser automation must wait for `settling()` to reach 0** before clicking, then re-read card positions: Pixi hit-tests cards where they are drawn, new hand cards make their neighbours slide, and on a phone a re-wrapping status bar resizes the table. Bring the tab to the front first (`Page.bringToFront`): headless Chrome throttles animation frames in background tabs, so a background table can look stuck.
 - **Touch is emulated over CDP** with `Emulation.setTouchEmulationEnabled` and `Input.dispatchTouchEvent`; see `tab.click`/`drag`/`longPress` in the smoke script.
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
-- **Next on the list:** online play by room code (see Not done; branch `room-codes`). Beyond that, the open items and risks at the end, and real card art (the one open question in `design.md`).
+- **Rooms in dev:** `?courier=local` makes room codes meet over `BroadcastChannel` between tabs of one browser, `?courier=off` turns them off; without either, dev uses the real public Nostr relays.
+- **Next:** not decided; candidates are under Next step.
 
 ## Summary
 
@@ -58,6 +59,7 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Board: targeting arrow (local and opponent) | `src/board/table.ts`, `overlay.ts`, `presence.ts` | Done |
 | Board: hover tilt and shine | `src/board/table.ts` | Done |
 | Single-player: computer opponent (policy, runner, lobby) | `src/bot/`, `transport/memory.ts`, `board/main.ts` | First pass |
+| Board: online by room code (Trystero), matching code, automatic reconnect | `src/board/rooms.ts`, `courier.ts`, `relink.ts` | Done |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -84,27 +86,20 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Design questions settled** (`design.md` § Resolved): a turn indicator (light along the side of whoever the game is waiting on, from a unit-tested `actingSeat`, plus a turn badge); a targeting arrow (a card that needs a target stays lifted and aims a dashed arrow that turns red and rings a valid target; the opponent sees it through an `aim` flag on drag presence); a tilt and light streak on mouse hover. Hidden-information display and WebAssembly (no) recorded as decided. Checked in headless Chrome on desktop and phone, from both seats; an aimed drop plays at its target. Also fixed: a second `stroke()` on a used-up PixiJS path drew nothing, which had left the Forest vine and Swamp tendrils without their highlight.
 - **Smoke test ports**: `npm run smoke` picks free ports per run; with fixed ones, two runs at once (e.g. another worktree's) attached to each other's browser and failed in confusing ways. It closes each phase's tabs before the next (leftover boards kept rendering and starved the last, phone, phase into stalling), allows a minute for setup and logs how long it took, and waits for a reloaded page to load before clicking (a click before the module runs submits the bare lobby form). New `vite.config.ts`: the file watcher ignores `.claude/` (other worktrees live inside this folder) and `smoke-output/`, whose changes were full-reloading open pages mid-match, in the dev server as well as in smoke runs; the smoke test now reports any such reload as an error.
 - **Single-player mode**: *Play the computer* in the lobby starts a match in one tab. The computer is a real second peer: its own `MatchCoordinator` over `createMemoryPair`, so the Mental Poker setup, reveals and audit run unchanged and it only knows what its seat may know. A new `src/bot/` layer (engine and match only; `tech.md` § Layering and `test/layers.spec.ts` updated) holds a pure, unit-tested policy (`policy.ts`) and a runner (`bot.ts`). The policy is greedy, not a search: it scores each legal action by how much it brings its own Domain or Mono closer or sets the opponent's back, plays a winning land at once, counters a play that would win (or a costly one while it holds 6 or more cards) and pays with the least useful card, keeps its last Island when nothing better is on offer, and breaks near-ties randomly. It beats random play 30 of 30. The runner waits for the table to stop moving, then 0.7 s more, so each move reads. Both seats save a snapshot on every change; after a reload the lobby offers *Carry on* (or *Start a new one*), and the two coordinators resume over a fresh in-memory link with the usual resend. Tested by bot-vs-bot full matches through real coordinators, a mid-match resume from both snapshots, and in `npm run smoke` (a full match against the computer by clicks and drags, then a reload mid-game).
-- **Tests**: 136 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
+- **Online by room code**: *Create a room* shows a four-character code; the other player types it and the match starts. Trystero (`trystero/nostr`, over public Nostr relays) only carries the usual invite and reply codes; the match runs over our own WebRTC link as before. Both screens show a matching code (four symbols from the link's DTLS fingerprints) so players can see nothing sits between them. A dropped or reloaded match reconnects on its own through a room named by the match id, with the code swap folded underneath as a fallback. `tech.md` principle 1 is now "no trusted server". Unit-tested with an in-memory courier and the fake WebRTC (fresh and reconnect rooms, joiner first, a full room, a partner who leaves early, cancelling, matching codes). `npm run smoke` meets by room code over a same-browser courier, checks both matching codes agree, and reconnects with no clicks after a drop and after a reload. Checked live twice in headless Chromium over the real relays: linked in 10 to 11 s, same matching code on both tabs, no console errors.
+- **Tests**: 144 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Online reconnect**: reconnect codes carry the match id (hash of log entry 0) and the inviter's seat, so either player can make one and mismatched codes are refused with a clear message. A dropped link opens a code-swap panel over the table and pauses play; a reloaded tab resumes from the lobby (`sessionStorage` snapshot) or can abandon the match. Tested at the transport level (a match survives its link dying, either seat inviting) and in `npm run smoke` over real WebRTC: a forced drop, then a reload, each followed by more moves in lockstep.
 - **Smoke test reliability**: the rare lost click in `npm run smoke` was the test clicking while a neighbouring card was still gliding over its target (new cards shuffle into the hand). The board exposes `settling()` to dev tooling and the test waits for the whole table to come to rest.
-- **Tooling**: `npm run dev` (Vite), `npm run build`, `npm run typecheck` (two configs: no-DOM layers, DOM board), `npm test`, `npm run demo`, `npm run smoke` (headless-Chrome play-through of the board). Node 24 type stripping; one runtime dependency (PixiJS).
+- **Tooling**: `npm run dev` (Vite), `npm run build`, `npm run typecheck` (two configs: no-DOM layers, DOM board), `npm test`, `npm run demo`, `npm run smoke` (headless-Chrome play-through of the board). Node 24 type stripping; two runtime dependencies (PixiJS, Trystero), both board only.
 
 ## Not done
 
-- **Online play by room code.** One player gets a short code (e.g. `K7QX`), the other types it, and the match starts: no copy-paste codes. Works anywhere with internet, not just on one Wi-Fi network. Decided 2026-10-24: online only (offline play dropped); `tech.md` principle 1 is now "no trusted server", so the two connection messages may travel through public relays found with [Trystero](https://github.com/dmotz/trystero), while the game itself stays peer-to-peer and verified by both sides.
-  - **Trystero as courier only.** Recommended: use a Trystero room just to swap the existing invite and reply codes, then connect with our own `transport/webrtc.ts` as today. That keeps the two data channels, the reconnect logic and the tests, and puts the npm package in `src/board/`, the only layer allowed one. (The alternative, a `PeerTransport` over Trystero's own connection, would replace tested code for no gain.)
-  - **Room names.** The typed code maps to a Trystero room under the game's app id. Public relays are shared, so a short code can collide with strangers: the room takes two players, a third is refused, and codes expire once both have joined. Encrypt what passes through the relays with a key derived from the code (check Trystero's room password option).
-  - **Matching code.** Both screens show a short emoji string built from both sides' DTLS fingerprints (read from the SDP), so players can see that nothing sits in the middle of the connection. Without it a dishonest relay could read the draw keys sent to you, which reveals your hand.
-  - **Reconnect.** A dropped or reloaded online match rejoins a room derived from the match id and re-swaps codes automatically; the code-swap panel becomes a fallback.
-  - **Fallbacks.** The copy-paste codes stay, behind a "Use codes instead" link, for when the relays are down.
-  - *Open question:* which Trystero strategy (Nostr, MQTT, BitTorrent trackers): pick by reliability and speed of finding the other player; possibly more than one.
-  - **ICE.** Still the public STUN server (players are on different networks now); no TURN, so strict NATs still fail, as today.
-  - **Lobby:** "Play online" leads with "Create a room" and "Join with a code". Tests: the courier behind a small interface, with a fake in unit tests; the smoke test uses a local fake relay rather than public ones, so it doesn't depend on the internet.
+Nothing on the current list.
 
 ## Next step
 
-Online play by room code (on the `room-codes` branch, to be rebased onto main); Trystero's relay strategy is the open question there. Other candidates: a stronger computer opponent (look-ahead, difficulty levels), rendering on demand (see the open items), the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and real card art (the one open question left in `design.md`).
+Not decided. Candidates: which Trystero strategy carries room codes (Nostr, MQTT, BitTorrent trackers, or several), trying room codes on real phones across two networks, a stronger computer opponent (look-ahead, difficulty levels), rendering on demand (see the open items), the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and real card art (the one open question left in `design.md`).
 
 ## Open items and risks
 
@@ -119,3 +114,7 @@ Online play by room code (on the `room-codes` branch, to be rebased onto main); 
 - Presence on touch: a finger shows the opponent which card it touches only while it is down; there is no idle cursor.
 - The computer opponent is a greedy first pass with one fixed level; it sends no presence (no hover or cursor), and both seats' setup runs on the tab's main thread, so starting a match against it takes a moment longer than two tabs.
 - The lobby's copy-paste codes are long; pasting them on a phone works in emulation, but sharing them from a phone (e.g. via a chat app) is untested.
+- Room codes depend on public Nostr relays run by strangers: they can be slow (10 to 11 s to link in testing), go away, or drop Trystero's traffic. The copy-paste codes stay as the fallback. Which Trystero strategy (Nostr, MQTT, BitTorrent trackers), or several at once, is still open.
+- A relay operator who knew a room code could sit between the players and read their hands; the four-character code is a weak password (about 920,000 codes). The matching code catches this only if players compare it. Reconnect rooms use the match id, so they are not exposed this way.
+- Room codes have not been tried on real phones or across two different networks yet.
+- Open question (from planning): a fallback when the direct link fails although both players are in the room (strict NATs, `.local` addresses that will not resolve). Trystero's own connection would fail the same way, so the likely fix is a TURN server (it relays only DTLS-encrypted traffic, so it can stay untrusted). Wait until it fails for real.

@@ -35,6 +35,20 @@
 
       <section>
         <h2>Online</h2>
+        <div id="rooms">
+          <button id="create-room" type="button">Create a room</button>
+          <form id="join-room-form" class="join-room">
+            <input id="room-code" placeholder="Room code" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code" />
+            <button type="submit">Join</button>
+          </form>
+          <div id="room-out" hidden>
+            <p>Your room code:</p>
+            <p id="room-code-out" class="room-code"></p>
+            <p class="hint">Tell it to the other player. The match starts when they join.</p>
+          </div>
+        </div>
+        <details id="manual-codes">
+        <summary>Use copy-paste codes instead</summary>
         <button id="invite" type="button">Create an invite</button>
         <div class="join">
           <textarea id="invite-code" rows="3" placeholder="…or paste an invite code here"></textarea>
@@ -49,6 +63,7 @@
           <textarea id="reply-code" rows="3" placeholder="Paste their reply code"></textarea>
           <button id="accept" type="button">Connect</button>
         </div>
+        </details>
       </section>
 
       <p id="lobby-message" role="status"></p>
@@ -58,10 +73,15 @@
       <header id="bar">
         <span id="prompt" role="status"></span>
         <div id="buttons"></div>
+        <button id="matching" type="button" class="quiet" aria-controls="matching-info" aria-expanded="false" hidden></button>
         <button id="history-toggle" type="button" class="quiet" aria-controls="history" aria-expanded="false" title="History">📜</button>
       </header>
       <div id="table">
         <div id="card-info" role="tooltip" hidden></div>
+        <p id="matching-info" hidden>
+          Both screens should show these same four symbols. If they differ, something is sitting between you and the other player and could see
+          your cards: stop and start a new match.
+        </p>
         <section id="history" aria-label="Match history" hidden>
           <header>
             <h2>History</h2>

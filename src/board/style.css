@@ -308,3 +308,93 @@ button {
     max-height: 58%;
   }
 }
+
+/* Online lobby: room codes first, the copy-paste codes folded away below. */
+.join-room {
+  display: inline-flex;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+#room-code {
+  width: 8em;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-family: ui-monospace, monospace;
+}
+
+.room-code {
+  margin: 4px 0;
+  font-family: ui-monospace, monospace;
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+}
+
+#manual-codes {
+  margin-top: 12px;
+}
+
+#manual-codes summary,
+#reconnect summary,
+#resume summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 8px 0;
+}
+
+/* The matching code: both players should see the same four symbols. */
+#matching {
+  margin-left: auto;
+  padding: 4px 8px;
+  font-size: 1rem;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+
+#matching[hidden] {
+  display: none;
+}
+
+#matching:not([hidden]) + #history-toggle {
+  margin-left: 0;
+}
+
+#matching[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+#matching-info {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 12px;
+  width: min(300px, calc(100% - 24px));
+  margin: 0;
+  padding: 10px 12px;
+  background: rgb(15 29 21 / 96%);
+  border: 1px solid #355a43;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+#matching-info[hidden] {
+  display: none;
+}
+
+@media (max-width: 719px) {
+  /* Below the prompt, at the end of the choice buttons' line (not a line of its own). */
+  #matching {
+    order: 3;
+    align-self: flex-start;
+    font-size: 0.85rem;
+  }
+
+  #bar:has(#matching:not([hidden])) #buttons {
+    flex-basis: calc(100% - 120px);
+  }
+}

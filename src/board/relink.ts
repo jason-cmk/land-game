@@ -1,8 +1,10 @@
-// Reconnecting an online match: both players swap a fresh pair of codes.
-// Either may make the invite; the codes carry the match id and the inviter's
-// seat (see transport/signal.ts), so a code from another match, or your own
-// code pasted back, is refused with a message instead of a broken link.
-// Used in the lobby (after a reload) and over the table (after a drop).
+// Reconnecting an online match. Both players rejoin a room named by the match
+// id and link up on their own (see rooms.ts); if the relays are out of reach,
+// they swap a fresh pair of codes instead. Either may make the invite; the
+// codes carry the match id and the inviter's seat (see transport/signal.ts), so
+// a code from another match, or your own code pasted back, is refused with a
+// message instead of a broken link. Used in the lobby (after a reload) and over
+// the table (after a drop).
 
 import type { Message } from '../match/protocol.ts';
 import type { Snapshot } from '../match/coordinator.ts';
@@ -10,6 +12,9 @@ import type { PeerTransport } from '../transport/types.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
 import type { Invite, Reconnect } from '../transport/webrtc.ts';
 import type { Presence } from './presence.ts';
+import { pageCourier } from './courier.ts';
+import { linkByRoom, matchRoom } from './rooms.ts';
+import type { RoomLink } from './rooms.ts';
 
 type Link = PeerTransport<Message, Presence>;
 
@@ -47,21 +52,36 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
   const connect = el('button', { type: 'button', textContent: 'Connect' });
   out.append(caption, code, copy);
   replyRow.append(reply, connect);
-  host.append(
+  const manual = [
     el('p', { textContent: 'Swap new codes to carry on. One of you makes a code and sends it; the other pastes it and sends back a reply.' }),
     make,
     theirs,
     use,
     out,
     replyRow,
-    message,
-  );
+  ];
+  // Rejoin the match's room on our own; the code swap stays as a fallback.
+  const courier = pageCourier();
+  let room: RoomLink | null = null;
+  if (courier === null) host.append(...manual, message);
+  else {
+    const auto = el('p', { textContent: 'Reconnecting… This happens on its own once the other player is back.' });
+    const fallback = el('details');
+    fallback.append(el('summary', { textContent: 'Not reconnecting? Swap codes instead' }), ...manual);
+    host.append(auto, message, fallback);
+    room = linkByRoom(courier, matchRoom(reconnect.match), reconnect.seat === 0 ? 'inviter' : 'joiner', { reconnect });
+    room.link.then((link) => {
+      invite?.cancel(); // a half-made code swap is not needed now
+      finish(link);
+    }, fail);
+  }
 
   let invite: Invite<Message, Presence> | null = null;
   let done = false;
   const finish = (link: Link): void => {
     if (done) return link.close();
     done = true;
+    room?.cancel();
     onLink(link);
   };
   const show = (text: string, value: string): void => {
@@ -109,6 +129,7 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
 
   return () => {
     done = true;
+    room?.cancel();
     invite?.cancel();
     host.replaceChildren();
   };

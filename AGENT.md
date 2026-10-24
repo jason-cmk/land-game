@@ -23,11 +23,11 @@ Read these before changing behaviour. The spec is the source of truth; anything 
 
 ## Commands
 
-Node 24+ (native TypeScript type stripping). Runtime dependency: PixiJS (board only). Vite for dev and build.
+Node 24+ (native TypeScript type stripping). Runtime dependencies: PixiJS and Trystero (board only). Vite for dev and build.
 
 - `npm run dev`: board at http://localhost:5173 (play the computer, or open two tabs)
 - `npm run build`
 - `npm run typecheck`
 - `npm test`
 - `npm run demo`
-- `npm run smoke`: headless-Chrome play-through of the board (two tabs, reload, real WebRTC, a touch phone, the computer); needs Chrome or Chromium (`CHROME_PATH` to override)
+- `npm run smoke`: headless-Chrome play-through of the board (two tabs, reload, real WebRTC, room codes, a touch phone, the computer); needs Chrome or Chromium (`CHROME_PATH` to override)

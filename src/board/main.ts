@@ -1,6 +1,6 @@
-// Board entry point: the lobby (the computer, two tabs, or online via copy-paste
-// codes), the status bar, and the wiring from the coordinator to the prompt and
-// the table.
+// Board entry point: the lobby (the computer, two tabs, or online by room code
+// or copy-paste codes), the status bar, and the wiring from the coordinator to
+// the prompt and the table.
 
 import './style.css';
 import { MatchCoordinator } from '../match/coordinator.ts';
@@ -11,8 +11,11 @@ import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
 import { runBot } from '../bot/bot.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
 import { createMemoryPair, localPeer } from '../transport/memory.ts';
-import { createInvite, joinInvite } from '../transport/webrtc.ts';
+import { WebRtcTransport, createInvite, joinInvite } from '../transport/webrtc.ts';
 import { matchId, relinkPanel } from './relink.ts';
+import { pageCourier } from './courier.ts';
+import { freshRoom, linkByRoom, matchingCode, newRoomCode, parseRoomCode } from './rooms.ts';
+import type { RoomLink } from './rooms.ts';
 import type { PeerTransport, TransportStatus } from '../transport/types.ts';
 import { dropOutcome, promptFor } from './controls.ts';
 import { counterChain } from './chain.ts';
@@ -74,6 +77,56 @@ $('tabs-form').addEventListener('submit', (event) => {
   void connectBroadcast<Message, Presence>(room, seat).then((link) => play(link, key, loadSnapshot(key), 'tabs'));
 });
 
+// Room codes: one player creates a room, the other types its code.
+const courier = pageCourier();
+let roomAttempt: RoomLink | null = null;
+if (courier === null) {
+  ($('rooms') as HTMLElement).hidden = true;
+  ($('manual-codes') as HTMLDetailsElement).open = true;
+}
+
+function meet(code: string, role: 'inviter' | 'joiner'): void {
+  if (courier === null) return;
+  roomAttempt?.cancel();
+  const attempt = linkByRoom(courier, freshRoom(code), role);
+  roomAttempt = attempt;
+  // Finding each other through the relays can take a while; say so rather than look stuck.
+  const slow = setTimeout(() => {
+    if (roomAttempt === attempt) {
+      setLobbyMessage(
+        role === 'inviter' ? 'Still waiting. Check they typed the code right.' : `Still looking for room ${code}. Check the code, and that the other player has the room open.`,
+      );
+    }
+  }, 20000);
+  attempt.link.then(
+    (link) => {
+      clearTimeout(slow);
+      startOnline(link);
+    },
+    (err: Error) => {
+      clearTimeout(slow);
+      if (roomAttempt === attempt) setLobbyMessage(`Could not join: ${err.message}.`);
+    },
+  );
+}
+
+$('create-room').addEventListener('click', () => {
+  const code = newRoomCode();
+  ($('room-out') as HTMLElement).hidden = false;
+  $('room-code-out').textContent = code;
+  setLobbyMessage('Waiting for the other player to join…');
+  meet(code, 'inviter');
+});
+
+$('join-room-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const code = parseRoomCode(($('room-code') as HTMLInputElement).value);
+  if (code === null) return setLobbyMessage('Room codes are four letters and digits, like K7QX.');
+  ($('room-out') as HTMLElement).hidden = true;
+  setLobbyMessage(`Looking for room ${code}…`);
+  meet(code, 'joiner');
+});
+
 $('invite').addEventListener('click', async () => {
   try {
     setLobbyMessage('Making an invite code…');
@@ -110,7 +163,12 @@ $('join').addEventListener('click', async () => {
 /** An online match keeps a snapshot per tab, so a reload can reconnect to it. */
 const ONLINE_KEY = 'land-game/snapshot/online';
 
+let started = false;
+
 function startOnline(link: Link): void {
+  if (started) return link.close(); // a room and a code swap both came through
+  started = true;
+  roomAttempt?.cancel();
   saveSnapshot(ONLINE_KEY, null); // a new match replaces any abandoned one
   play(link, ONLINE_KEY, null, 'online');
 }
@@ -121,7 +179,12 @@ const unfinishedId = unfinished === null ? null : matchId(unfinished.log);
 if (unfinished !== null && unfinishedId !== null) {
   ($('resume') as HTMLElement).hidden = false;
   $('resume-caption').textContent = `You are seat ${unfinished.seat + 1}, ${unfinished.log.length - 1} moves in.`;
-  const stop = relinkPanel($('resume-panel'), { match: unfinishedId, seat: unfinished.seat }, (link) => play(link, ONLINE_KEY, unfinished, 'online'));
+  const stop = relinkPanel($('resume-panel'), { match: unfinishedId, seat: unfinished.seat }, (link) => {
+    if (started) return link.close();
+    started = true;
+    roomAttempt?.cancel();
+    play(link, ONLINE_KEY, unfinished, 'online');
+  });
   $('abandon').addEventListener('click', () => {
     if (!confirm('Abandon this match? It cannot be resumed afterwards.')) return;
     stop();
@@ -196,6 +259,7 @@ $('copy-code').addEventListener('click', () => {
  * matches offer a code swap when the link drops; two tabs just reload.
  */
 function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode: Mode): Table {
+  roomAttempt?.cancel(); // a room still searching must not start a second match
   const online = mode === 'online';
   $('lobby').hidden = true;
   $('game').hidden = false;
@@ -423,6 +487,17 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     }
     render();
   };
+  // Matching code: both players should see the same symbols for their link.
+  const matching = $('matching');
+  const matchingInfo = $('matching-info');
+  const showMatching = (open: boolean): void => {
+    matchingInfo.hidden = !open;
+    matching.setAttribute('aria-expanded', String(open));
+  };
+  matching.onclick = () => showMatching(matchingInfo.hidden);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') showMatching(false);
+  });
   /** Listen to `next` instead of the current link (which is closed if still open). */
   let unhook: Array<() => void> = [];
   const attach = (next: Link): void => {
@@ -431,6 +506,12 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     link = next;
     unhook = [next.onStatus(onStatus), next.onPresence(onPresence)];
     if (previous !== next) previous.close();
+    const session = next instanceof WebRtcTransport ? next.session : null;
+    matching.hidden = session === null;
+    if (session !== null) {
+      matching.textContent = matchingCode(session.offer, session.answer);
+      matching.setAttribute('aria-label', `Matching code ${matching.textContent}: check the other player sees the same`);
+    }
   };
   // Presence: cosmetic, best effort, never touches the coordinator.
   let peerHover: Presence | null = null;
@@ -507,6 +588,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
         if (historyPanel.hidden) setHistoryOpen(true);
         return [...$('history-list').querySelectorAll('ul > li')].map((li) => li.textContent ?? '');
       },
+      /** The matching code in the status bar, or null if this link has none. */
+      matchingCode: () => (matching.hidden ? null : matching.textContent),
       /** The card info panel's text, or null while it is hidden. */
       cardInfo: () => ($('card-info').hidden ? null : $('card-info').textContent),
       /** Simulate the network dropping (this end closes; the peer sees its channels close). */

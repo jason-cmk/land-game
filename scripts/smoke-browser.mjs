@@ -4,6 +4,9 @@
 //   2. a tab reloaded mid-game resumes in lockstep
 //   3. two tabs connect over real WebRTC with the copy-paste codes and play, then
 //      reconnect with fresh codes after a dropped link and after a reload
+//   3b. two tabs meet by room code (through a same-browser stand-in for the
+//      public relays), show the same matching code, and reconnect on their own
+//      after a dropped link and after a reload
 //   4. a phone-sized touch tab against a desktop tab: taps, touch drags, and the
 //      card info shown by a long press (touch) and a hover (mouse)
 //   5. a full match against the computer in one tab, then one reloaded mid-game
@@ -87,7 +90,7 @@ try {
   const DESKTOP = { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false };
   const PHONE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true };
 
-  async function openTab(name, device = DESKTOP) {
+  async function openTab(name, device = DESKTOP, query = '') {
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     await send('Runtime.enable', {}, sessionId);
@@ -95,7 +98,7 @@ try {
     await send('Emulation.setDeviceMetricsOverride', device, sessionId);
     if (device.mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, sessionId);
     await send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId);
-    await send('Page.navigate', { url: PAGE }, sessionId);
+    await send('Page.navigate', { url: PAGE + query }, sessionId);
     const tab = {
       name,
       /** Close the tab: every open board keeps rendering, and leftovers starve later phases' setup. */
@@ -110,6 +113,11 @@ try {
       },
       async front() {
         await send('Page.bringToFront', {}, sessionId);
+      },
+      /** Reload from the front (no page timer to throttle, no eval to lose its reply). */
+      async reload() {
+        await send('Page.bringToFront', {}, sessionId);
+        await send('Page.reload', {}, sessionId);
       },
       /** A click, or a tap on a touch tab. */
       async click(x, y) {
@@ -318,8 +326,9 @@ try {
   // --- Online (real WebRTC between two headless tabs) ----------------------------------
   for (const t of [c, d]) await t.close();
   log('== online (WebRTC)');
-  const e = await openTab('inviter');
-  const f = await openTab('joiner');
+  // Rooms off: this phase checks the copy-paste codes, by hand.
+  const e = await openTab('inviter', DESKTOP, '?courier=off');
+  const f = await openTab('joiner', DESKTOP, '?courier=off');
   await e.eval(`document.getElementById('invite').click()`);
   const invite = await (async () => {
     for (let i = 0; i < 100; i++) {
@@ -392,8 +401,48 @@ try {
   const afterResume = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'reload: heads converge');
   log('reload: log', resumed[1].log, '->', afterResume[1].log, 'heads equal', afterResume[0].head === afterResume[1].head);
 
-  // --- A phone (touch) against a desktop tab ------------------------------------------
+  // --- Online by room code (the local courier stands in for the public relays) ---------
   for (const t of [e, f]) await t.close();
+  log('== online by room code');
+  const r = await openTab('room-host', DESKTOP, '?courier=local');
+  const s = await openTab('room-guest', DESKTOP, '?courier=local');
+  await r.eval(`document.getElementById('create-room').click()`);
+  const roomCode = await poll(r, `document.getElementById('room-code-out').textContent`, 'room code');
+  log('room code', roomCode);
+  await r.shot('room-created.png');
+  await s.eval(`document.getElementById('room-code').value = ${JSON.stringify(roomCode.toLowerCase())}; document.getElementById('join-room-form').requestSubmit()`);
+  await setup([r, s], 'room');
+  const matchCodes = await Promise.all([r, s].map((t) => t.eval('window.__landGame.matchingCode()')));
+  log('room: matching codes', matchCodes);
+  if (matchCodes[0] === null || matchCodes[0] !== matchCodes[1]) throw new Error(`matching codes differ: ${matchCodes.join(' / ')}`);
+  await playByClicking([r, s], 10, 'room');
+  const roomPlayed = await waitFor([r, s], (x) => x[0].head === x[1].head, 10000, 'room: heads converge');
+  await r.shot('room-playing.png');
+
+  log('== room: the link drops, and comes back on its own');
+  await r.eval('window.__landGame.dropLink()');
+  for (const t of [r, s]) await poll(t, `!document.getElementById('reconnect').hidden`, `${t.name}: reconnect panel`);
+  await s.shot('room-dropped.png');
+  for (const t of [r, s]) await poll(t, `document.getElementById('reconnect').hidden`, `${t.name}: reconnects by itself`);
+  const roomRelinked = await waitFor([r, s], (x) => x.every((y) => y?.status === 'playing') && x[0].head === x[1].head, 20000, 'room drop: resynced');
+  const relinkCodes = await Promise.all([r, s].map((t) => t.eval('window.__landGame.matchingCode()')));
+  if (relinkCodes[0] === null || relinkCodes[0] !== relinkCodes[1]) throw new Error(`matching codes differ after relink: ${relinkCodes.join(' / ')}`);
+  await playByClicking([r, s], 6, 'room-relinked');
+  log('room drop: log', roomPlayed[0].log, '->', roomRelinked[0].log, 'matching', relinkCodes[0]);
+
+  log('== room: a tab reloads, and comes back on its own');
+  const beforeRoomReload = await waitFor([r, s], (x) => x[0].head === x[1].head, 10000, 'room: heads converge before reload');
+  if (beforeRoomReload.some((x) => x.status === 'over')) throw new Error('room match ended before the reload check; raise the move budget');
+  await s.eval('window.__oldPage = true'); // tells the old page from the new
+  await s.reload();
+  await poll(s, `!window.__oldPage && document.readyState === 'complete' && window.__landGame?.coordinator?.status === 'playing'`, 'reloaded tab resumes by itself', 30000);
+  const roomResumed = await waitFor([r, s], (x) => x.every((y) => y?.status === 'playing') && x[0].head === x[1].head, 20000, 'room reload: resynced');
+  await playByClicking([r, s], 6, 'room-resumed');
+  const roomEnd = await waitFor([r, s], (x) => x[0].head === x[1].head, 10000, 'room reload: heads converge');
+  log('room reload: log', roomResumed[1].log, '->', roomEnd[1].log, 'heads equal', roomEnd[0].head === roomEnd[1].head);
+
+  // --- A phone (touch) against a desktop tab ------------------------------------------
+  for (const t of [r, s]) await t.close();
   log('== phone (touch) vs desktop');
   const g = await openTab('phone', PHONE);
   const h = await openTab('desk');
