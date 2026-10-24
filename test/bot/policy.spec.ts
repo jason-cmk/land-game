@@ -85,7 +85,7 @@ test('plays rather than passes when it has a useful land', () => {
 });
 
 test('counters a winning play, paying with the least useful card', () => {
-  const pending: PendingPlay = { card: 'p1-slot-00', land: 'plains', controller: 1, declaredTarget: null, reuseLand: null, counters: 0 };
+  const pending: PendingPlay = { card: 'p1-slot-00', land: 'plains', controller: 1, declaredTarget: null, counters: 0 };
   const { state, priv } = table(
     { hand: ['island', 'mountain', 'forest'], battlefield: ['forest', 'forest'] },
     { hand: ['plains'], battlefield: ['forest', 'island', 'mountain', 'swamp'] },
@@ -97,13 +97,13 @@ test('counters a winning play, paying with the least useful card', () => {
 });
 
 test('lets a harmless play through rather than spend a small hand', () => {
-  const pending: PendingPlay = { card: 'p1-slot-00', land: 'island', controller: 1, declaredTarget: null, reuseLand: null, counters: 0 };
+  const pending: PendingPlay = { card: 'p1-slot-00', land: 'island', controller: 1, declaredTarget: null, counters: 0 };
   const { state, priv } = table({ hand: ['island', 'mountain', 'forest'] }, { hand: ['island'], battlefield: ['forest'] }, { phase: 'respond', activeSeat: 1, pending });
   assert.equal(choose(state, priv).type, 'allow');
 });
 
 test('counters back to save its own winning play', () => {
-  const pending: PendingPlay = { card: 'p0-slot-02', land: 'swamp', controller: 0, declaredTarget: null, reuseLand: null, counters: 1 };
+  const pending: PendingPlay = { card: 'p0-slot-02', land: 'swamp', controller: 0, declaredTarget: null, counters: 1 };
   const { state, priv } = table(
     { hand: ['island', 'plains', 'swamp'], battlefield: ['forest', 'island', 'mountain', 'plains'] },
     { battlefield: ['forest'] },
@@ -113,7 +113,7 @@ test('counters back to save its own winning play', () => {
 });
 
 test('a Swamp discard takes the card that helps the opponent most', () => {
-  const pending: PendingPlay = { card: 'p0-slot-09', land: 'swamp', controller: 0, declaredTarget: null, reuseLand: null, counters: 0 };
+  const pending: PendingPlay = { card: 'p0-slot-09', land: 'swamp', controller: 0, declaredTarget: null, counters: 0 };
   const { state, priv } = table({}, { hand: ['forest', 'plains'], battlefield: ['forest', 'island', 'mountain', 'swamp'] }, { phase: 'target', pending });
   // The reveal makes the opponent's hand public.
   const revealed: GameState = {

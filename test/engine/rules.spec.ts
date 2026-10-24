@@ -140,7 +140,7 @@ test('turn 1 has no start-of-turn draw: after playing, only the island draw is p
   assert.equal(g.s.players[0].hand.length, 5);
   const draw = g.s.awaitingDraw!;
   assert.equal(draw.seat, 0);
-  assert.equal(draw.purpose, 'islandDraw');
+  assert.equal(draw.purpose, 'effectDraw');
 });
 
 test('grantDrawKey by the drawer or for the wrong card is illegal', () => {
@@ -389,114 +389,39 @@ test('swamp reveal must cover exactly the whole hand, only by the hand owner', (
 // Plains
 // ---------------------------------------------------------------------------
 
-test('plains reusing island: draw, then the turn ends', () => {
+test('plains: draw a card, then the turn ends', () => {
+  const g = new Game(0);
+  g.claim('p0-slot-00', 'plains');
+  g.play(0, 'p0-slot-00', 'plains');
+  g.act(1, { type: 'allow' });
+  assert.deepEqual(g.s.players[0].battlefield.map((s) => s.land), ['plains']);
+  assert.equal(g.s.phase, 'drawKey');
+  assert.equal(g.s.awaitingDraw?.seat, 0);
+  assert.equal(g.s.awaitingDraw?.purpose, 'effectDraw');
+  assert.equal(g.s.players[0].hand.length, 5); // four left after the play, plus the draw
+  g.grantDraw('island');
+  assert.equal(g.s.turn, 2);
+  assert.equal(g.s.activeSeat, 1);
+});
+
+test('plains takes no declared target, and is offered as a single play', () => {
   const g = new Game(0);
   g.claim('p0-slot-00', 'island');
   g.claim('p0-slot-01', 'plains');
   turnIsland(g, 0, 'p0-slot-00'); // t1: island
   passTurn(g); // t2 -> t3
-  g.play(0, 'p0-slot-01', 'plains', 'p0-slot-00');
-  g.act(1, { type: 'allow' });
-  assert.equal(g.s.phase, 'drawKey');
-  assert.equal(g.s.awaitingDraw?.seat, 0);
-  assert.equal(g.s.awaitingDraw?.purpose, 'islandDraw');
-  g.grantDraw('island');
-  assert.equal(g.s.turn, 4);
-  assert.equal(g.s.activeSeat, 1);
+  g.expectError(0, { type: 'play', card: 'p0-slot-01', land: 'plains', declaredTarget: 'p0-slot-00' }, 'takes no declared target');
+  const plays = legalActions(g.s, 0, g.privOf(0)).filter((a) => a.type === 'play' && a.land === 'plains');
+  assert.deepEqual(plays, [{ type: 'play', card: 'p0-slot-01', land: 'plains' }]);
 });
 
-test('plains reusing mountain: goes to a target phase, then destroys', () => {
-  const g = new Game(0);
-  turnIsland(g, 0, 'p0-slot-00'); // t1
-  turnIsland(g, 1, 'p1-slot-00'); // t2
-  g.claim('p0-slot-01', 'mountain');
-  g.play(0, 'p0-slot-01', 'mountain'); // t3: no declared target, no effect
-  g.act(1, { type: 'allow' });
-  g.grantDraw('island'); // t4 draw for p1
-  g.act(1, { type: 'pass' }); // t4 -> t5
-  g.grantDraw('plains'); // t5 draw for p0
-  g.claim('p0-slot-02', 'plains');
-  g.play(0, 'p0-slot-02', 'plains', 'p0-slot-01'); // reuse own mountain
-  g.act(1, { type: 'allow' });
-
-  assert.equal(g.s.phase, 'target');
-  g.act(0, { type: 'resolveTarget', target: 'p1-slot-00' });
-  assert.deepEqual(g.s.players[1].battlefield, []);
-  assert.deepEqual(g.s.players[1].graveyard.map((s) => s.id), ['p1-slot-00']);
-  assert.equal(g.s.phase, 'drawKey'); // t6
-});
-
-test('plains reusing forest: target phase returns a graveyard card', () => {
-  const g = new Game(0);
-  g.claim('p0-slot-00', 'forest');
-  g.play(0, 'p0-slot-00', 'forest'); // t1: forest, no effect (empty graveyard)
-  g.act(1, { type: 'allow' });
-  g.grantDraw('island'); // t2 draw for p1
-  g.claim('p1-slot-00', 'island');
-  g.claim('p1-slot-01', 'island');
-  g.claim('p1-slot-02', 'island');
-  g.play(1, 'p1-slot-00', 'island'); // t2: p1 island
-  g.act(0, { type: 'counter', island: 'p0-slot-01', islandLand: 'island', other: 'p0-slot-02', otherLand: 'swamp' });
-  g.act(1, { type: 'allow' }); // countered -> t3
-  g.grantDraw('island'); // t3 start draw for p0
-  g.claim('p0-slot-03', 'island');
-  g.play(0, 'p0-slot-03', 'island'); // t3: p0 island
-  g.act(1, { type: 'allow' });
-  g.grantDraw('island'); // the island draw for p0
-  g.grantDraw('island'); // t4 start draw for p1
-  g.act(1, { type: 'pass' }); // -> t5
-  g.grantDraw(); // t5 draw for p0
-  g.claim('p0-slot-04', 'plains'); // p0's last opening-hand card is the Plains
-  g.play(0, 'p0-slot-04', 'plains', 'p0-slot-00'); // reuse the t1 forest
-  g.act(1, { type: 'allow' });
-
-  assert.equal(g.s.phase, 'target');
-  g.act(0, { type: 'resolveTarget', target: 'p0-slot-01' }); // buried island
-  assert.deepEqual(g.s.players[0].graveyard.map((s) => s.id), ['p0-slot-02']);
-  assert.deepEqual(g.s.players[0].hand.find((s) => s.id === 'p0-slot-01'), { id: 'p0-slot-01', land: 'island' });
-});
-
-test('plains reusing swamp: reveal, then discard', () => {
-  const g = new Game(0);
-  g.claim('p0-slot-00', 'swamp');
-  g.claim('p0-slot-01', 'plains');
-  g.claim('p0-slot-02', 'island');
-  turnIsland(g, 0, 'p0-slot-02'); // t1
-  passTurn(g); // t2 -> t3, start draw granted inside
-  g.play(0, 'p0-slot-00', 'swamp'); // t3
-  g.act(1, { type: 'allow' });
-  const reveal = g.s.players[1].hand.map((slot) => ({ card: slot.id, land: 'island' as Land }));
-  g.act(1, { type: 'revealHandForSwamp', cards: reveal });
-  g.act(0, { type: 'resolveTarget', target: 'p1-slot-04' });
-  g.grantDraw('plains'); // t4 draw for p1
-  g.act(1, { type: 'pass' }); // t4 -> t5
-  g.grantDraw('plains'); // t5 draw for p0
-  assert.deepEqual(g.s.players[0].battlefield.map((s) => s.land), ['island', 'swamp']);
-  g.play(0, 'p0-slot-01', 'plains', 'p0-slot-00'); // reuse the swamp
-  g.act(1, { type: 'allow' });
-  assert.equal(g.s.phase, 'revealHand');
-  const reveal2 = g.s.players[1].hand.map((slot) => ({ card: slot.id, land: 'island' as Land }));
-  g.act(1, { type: 'revealHandForSwamp', cards: reveal2 });
-  assert.equal(g.s.phase, 'target');
-  g.act(0, { type: 'resolveTarget', target: 'p1-slot-03' });
-  assert.equal(g.s.phase, 'drawKey');
-});
-
-test('plains: no non-Plains land to reuse -> no declaredTarget required; naming the Plains itself is illegal', () => {
+test('plains drawing from an empty deck loses', () => {
   const g = new Game(0);
   g.claim('p0-slot-00', 'plains');
-  g.play(0, 'p0-slot-00', 'plains'); // empty battlefield
+  g.s = { ...g.s, players: [{ ...g.s.players[0], library: [] }, g.s.players[1]] };
+  g.play(0, 'p0-slot-00', 'plains');
   g.act(1, { type: 'allow' });
-  assert.deepEqual(g.s.players[0].battlefield.map((s) => s.land), ['plains']);
-  g.grantDraw(); // t2 draw for p1
-  g.act(1, { type: 'pass' }); // -> t3
-  g.grantDraw('plains'); // t3 draw for p0
-  g.claim('p0-slot-01', 'plains');
-  // battlefield contains only a Plains: no candidates at all
-  g.expectError(0, { type: 'play', card: 'p0-slot-01', land: 'plains', declaredTarget: 'p0-slot-00' });
-  g.play(0, 'p0-slot-01', 'plains'); // legal with no target
-  g.act(1, { type: 'allow' });
-  assert.equal(g.s.phase, 'drawKey');
+  assert.deepEqual(g.s.winner, { seat: 1, reason: 'decked' });
 });
 
 // ---------------------------------------------------------------------------
@@ -622,9 +547,9 @@ test('domain: one of each land type wins', () => {
   g.grantDraw('plains'); // t6 draw for p1
   g.act(1, { type: 'pass' }); // -> t7
   g.grantDraw('plains'); // t7 draw for p0
-  g.play(0, 'p0-slot-03', 'plains', 'p0-slot-01'); // reuse forest: graveyard empty -> no targets -> no effect
+  g.play(0, 'p0-slot-03', 'plains'); // t7: plains draws
   g.act(1, { type: 'allow' });
-  assert.equal(g.s.players[0].graveyard.length, 0); // forest-reuse target pool was empty
+  g.grantDraw('island'); // the plains draw for p0
   g.grantDraw('forest'); // t8 draw for p1
   g.act(1, { type: 'pass' }); // -> t9
   const mountainCard = g.grantDraw('mountain'); // t9 draw for p0

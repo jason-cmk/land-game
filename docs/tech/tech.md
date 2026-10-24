@@ -117,7 +117,7 @@ What is declared at announcement versus chosen at resolution is a rules requirem
 |---|---|---|
 | Mountain | the opponent's battlefield land to destroy | — |
 | Forest | the graveyard land to return | — |
-| Plains | which non-Plains land on your battlefield it reuses | whatever that land's effect needs (`revealHand` → `target` for Swamp, `drawKey` for Island, or `target` for Mountain/Forest) |
+| Plains | — | opponent grants draw key (`grantDrawKey`) for the top card of library, as for Island |
 | Swamp | — | first opponent runs `revealHandForSwamp`, then Swamp controller runs `resolveTarget` |
 | Island | — | opponent grants draw key (`grantDrawKey`) for the top card of library |
 
@@ -345,7 +345,7 @@ Even though we use peer-to-peer lockstep with Mental Poker now, `engine/` has ze
 ## Testing
 
 - **Mental Poker crypto tests.** Encrypt 50 cards through steps A→B→C→D, unlock individual slots, verify commutative property, verify tampered keys and tampered decks (e.g. 11 Islands) are caught.
-- **Rules matrix.** One test per land per edge case: counter chains of length 1–4, Plains reusing each land, effects with no legal target, decking out, and the win-before-effect-resolution rule.
+- **Rules matrix.** One test per land per edge case: counter chains of length 1–4, Plains drawing, effects with no legal target, decking out, and the win-before-effect-resolution rule.
 - **"Spend known copies first" test.** Player holds 1 revealed Island (from Forest or Swamp) and 1 unrevealed Island (from deck); playing or countering with an Island must always consume the revealed slot and leave the unrevealed slot `land: null`.
 - **Lockstep determinism.** Two `MatchCoordinator` instances wired in memory play full random games; their `stateHash` and `headHash` must match after every single action.
 

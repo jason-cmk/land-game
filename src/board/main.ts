@@ -22,6 +22,7 @@ import { counterChain } from './chain.ts';
 import type { ChainStep } from './chain.ts';
 import { cuesBetween } from './effects.ts';
 import { CARD_INFO, infoPlacement } from './cardinfo.ts';
+import { richText, setRichText } from './mana.ts';
 import { matchHistory } from './history.ts';
 import { dragMessage, hoverMessage, hoveredCard, peerCursor, peerDrag } from './presence.ts';
 import type { Presence } from './presence.ts';
@@ -357,7 +358,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
         lines.append(
           ...turn.lines.map((line) => {
             const row = document.createElement('li');
-            row.textContent = line.text;
+            row.replaceChildren(...richText(line.text));
             row.className = line.seat === null ? 'outcome' : line.seat === coordinator.seat ? 'you' : 'them';
             return row;
           }),
@@ -378,7 +379,14 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     const { name, lines } = CARD_INFO[info.land];
     const heading = document.createElement('strong');
     heading.textContent = name;
-    panel.replaceChildren(heading, ...lines.map((line) => Object.assign(document.createElement('p'), { textContent: line })));
+    panel.replaceChildren(
+      heading,
+      ...lines.map((line) => {
+        const p = document.createElement('p');
+        p.append(...richText(line));
+        return p;
+      }),
+    );
     const host = $('table');
     const at = infoPlacement(info.box, { width: panel.offsetWidth, height: panel.offsetHeight }, { width: host.clientWidth, height: host.clientHeight });
     panel.style.transform = `translate(${at.x}px, ${at.y}px)`;
@@ -437,15 +445,29 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights, chain }, cues);
     renderHistory();
 
-    status.textContent = (connection === 'open' || coordinator.status === 'over' ? statusText(prompt) : connectionText()) + (error ? ` (${error})` : '');
-    const addButton = (label: string, onClick: () => void, quiet = false): void => {
+    setRichText(status, (connection === 'open' || coordinator.status === 'over' ? statusText(prompt) : connectionText()) + (error ? ` (${error})` : ''));
+    const addButton = (label: string, onClick: () => void, quiet = false, into = buttons): void => {
       const button = document.createElement('button');
-      button.textContent = label;
+      button.append(...richText(label));
       if (quiet) button.className = 'quiet';
       button.onclick = onClick;
-      buttons.append(button);
+      into.append(button);
     };
-    if (prompt !== null && 'buttons' in prompt) for (const choice of prompt.buttons) addButton(choice.label, () => submit(choice.action));
+    // A counter decision is a popup in the middle of the table, with the land it is about.
+    const choice = $('choice');
+    const deciding = prompt?.kind === 'respond';
+    choice.hidden = !deciding;
+    if (prompt?.kind === 'respond') {
+      const land = state.pending?.land;
+      const image = land === undefined ? null : table.faceImage(land);
+      const card = $<HTMLImageElement>('choice-card');
+      card.hidden = image === null;
+      if (image !== null) card.src = image;
+      setRichText($('choice-text'), prompt.text);
+      const choiceButtons = $('choice-buttons');
+      choiceButtons.replaceChildren();
+      for (const option of prompt.buttons) addButton(option.label, () => submit(option.action), option.action.type === 'allow', choiceButtons);
+    } else if (prompt !== null && 'buttons' in prompt) for (const option of prompt.buttons) addButton(option.label, () => submit(option.action));
     if (prompt?.kind === 'declare') addButton('Cancel', () => ((picked = null), render()), true);
     if (coordinator.status === 'playing' && connection === 'open') addButton('Resign', () => confirm('Resign this match?') && submit({ type: 'resign' }), true);
     if (coordinator.status === 'over') {
@@ -574,10 +596,10 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
           prompt?.kind === 'main' ? [...prompt.playable.keys()] : prompt?.kind === 'declare' || prompt?.kind === 'resolve' ? [...prompt.targets.keys()] : [];
         const canvas = $('table').getBoundingClientRect();
         const cards = ids.flatMap((id) => {
-          const at = table.cardPosition(id);
+          const at = table.visiblePoint(id);
           return at === null ? [] : [{ id, x: canvas.left + at.x, y: canvas.top + at.y }];
         });
-        const buttons = [...$('buttons').querySelectorAll('button')].map((b) => b.textContent ?? '');
+        const buttons = [...document.querySelectorAll('#buttons button, #choice:not([hidden]) button')].map((b) => b.textContent ?? '');
         return { kind: prompt?.kind ?? null, cards, buttons, cues: lastCues };
       },
       playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
@@ -595,7 +617,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
       /** Simulate the network dropping (this end closes; the peer sees its channels close). */
       dropLink: () => link.close(),
       cardAt: (id: CardId) => {
-        const at = table.cardPosition(id);
+        const at = table.visiblePoint(id);
         const canvas = $('table').getBoundingClientRect();
         return at === null ? null : { x: canvas.left + at.x, y: canvas.top + at.y };
       },

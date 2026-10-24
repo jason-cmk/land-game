@@ -171,8 +171,8 @@ function endTurn(state: GameState): GameState {
   };
 }
 
-/** A draw inside a turn (Island resolution). Drawing from an empty deck loses. */
-function drawFor(state: GameState, seat: Seat, purpose: 'islandDraw'): GameState {
+/** A draw inside a turn (Island or Plains resolution). Drawing from an empty deck loses. */
+function drawFor(state: GameState, seat: Seat, purpose: 'effectDraw'): GameState {
   const drawn = popTop(state, seat);
   if (drawn === null) {
     return { ...state, pending: null, awaitingDraw: null, phase: 'over', winner: { seat: other(seat), reason: 'decked' } };
@@ -243,9 +243,9 @@ function applyPlay(state: GameState, seat: Seat, card: CardId, land: Land, decla
   assertPublicLandMatches(slot, land, 'play');
   spendKnownFirst(slot, state.players[seat].hand, land);
 
-  let reuseLand: Land | null = null;
   switch (land) {
     case 'island':
+    case 'plains':
     case 'swamp':
       if (declaredTarget !== null) throw new IllegalActionError(`${land} takes no declared target`);
       break;
@@ -261,22 +261,9 @@ function applyPlay(state: GameState, seat: Seat, card: CardId, land: Land, decla
         if (!target) throw new IllegalActionError(`declared target ${declaredTarget} is not in your graveyard`);
       }
       break;
-    case 'plains': {
-      const candidates = state.players[seat].battlefield.filter((s) => s.land !== 'plains');
-      if (candidates.length === 0) {
-        if (declaredTarget !== null) throw new IllegalActionError('no non-Plains land to reuse');
-      } else {
-        if (declaredTarget === null) throw new IllegalActionError('plains must declare which land to reuse');
-        const target = candidates.find((s) => s.id === declaredTarget);
-        if (!target) throw new IllegalActionError(`declared target ${declaredTarget} is not a non-Plains land you control`);
-        if (target.land === null) throw new IllegalActionError('battlefield lands are always public');
-        reuseLand = target.land;
-      }
-      break;
-    }
   }
 
-  const pending: PendingPlay = { card, land, controller: seat, declaredTarget, reuseLand, counters: 0 };
+  const pending: PendingPlay = { card, land, controller: seat, declaredTarget, counters: 0 };
   return { ...state, phase: 'respond', pending };
 }
 
@@ -338,7 +325,7 @@ function applyAllow(state: GameState, seat: Seat): GameState {
 function resolveEffect(state: GameState, pending: PendingPlay): GameState {
   const controller = pending.controller;
 
-  if (pending.land === 'island') return drawFor(state, controller, 'islandDraw');
+  if (pending.land === 'island' || pending.land === 'plains') return drawFor(state, controller, 'effectDraw');
 
   if (pending.land === 'mountain') {
     // Target was declared before the counter window; apply it now.
@@ -351,23 +338,9 @@ function resolveEffect(state: GameState, pending: PendingPlay): GameState {
     return endTurn(moveTo(state, controller, 'graveyard', 'hand', pending.declaredTarget, null));
   }
 
-  // Swamp and Plains-reused effects decide their actions at resolution.
-  if (pending.land === 'swamp') {
-    if (state.players[other(controller)].hand.length === 0) return endTurn(state); // nothing to reveal or discard
-    return { ...state, phase: 'revealHand' };
-  }
-
-  // pending.land === 'plains': reuse the declared land's effect.
-  if (pending.reuseLand === null) return endTurn(state); // no non-Plains land to reuse: no effect
-  if (pending.reuseLand === 'island') return drawFor(state, controller, 'islandDraw');
-  if (pending.reuseLand === 'mountain' || pending.reuseLand === 'forest') {
-    const kind = pending.reuseLand === 'mountain' ? 'opponentBattlefield' : 'ownGraveyard';
-    if (validTargets(state, pending.controller, kind).length === 0) return endTurn(state); // nothing to act on
-    return { ...state, pending: { ...pending, land: 'plains', reuseLand: pending.reuseLand }, phase: 'target' };
-  }
-  // pending.reuseLand === 'swamp'
+  // pending.land === 'swamp': the discard is chosen at resolution.
   if (state.players[other(controller)].hand.length === 0) return endTurn(state); // nothing to reveal or discard
-  return { ...state, pending: { ...pending, reuseLand: 'swamp' }, phase: 'revealHand' };
+  return { ...state, phase: 'revealHand' };
 }
 
 // --- revealHandForSwamp -----------------------------------------------------
@@ -409,23 +382,9 @@ function applyRevealHandForSwamp(state: GameState, seat: Seat, cards: ReadonlyAr
 
 // --- resolveTarget ----------------------------------------------------------
 
-type TargetKind = 'opponentHand' | 'opponentBattlefield' | 'ownGraveyard' | 'none';
-
-function targetKind(pending: PendingPlay): TargetKind {
-  if (pending.land === 'swamp' || (pending.land === 'plains' && pending.reuseLand === 'swamp')) {
-    return 'opponentHand';
-  }
-  if (pending.land === 'plains') {
-    if (pending.reuseLand === 'mountain') return 'opponentBattlefield';
-    if (pending.reuseLand === 'forest') return 'ownGraveyard';
-  }
-  return 'none';
-}
-
-function validTargets(state: GameState, controller: Seat, kind: 'opponentHand' | 'opponentBattlefield' | 'ownGraveyard'): CardId[] {
-  const owner = kind === 'ownGraveyard' ? controller : other(controller);
-  const zone: Zone = kind === 'opponentHand' ? 'hand' : kind === 'opponentBattlefield' ? 'battlefield' : 'graveyard';
-  return state.players[owner][zone].map((s) => s.id);
+/** The cards a resolving effect may target: only a Swamp's discard is chosen at resolution. */
+function resolveTargets(state: GameState, pending: PendingPlay): CardId[] | null {
+  return pending.land === 'swamp' ? state.players[other(pending.controller)].hand.map((s) => s.id) : null;
 }
 
 function applyResolveTarget(state: GameState, seat: Seat, target: CardId): GameState {
@@ -435,24 +394,11 @@ function applyResolveTarget(state: GameState, seat: Seat, target: CardId): GameS
   }
   if (seat !== pending.controller) throw new IllegalActionError(`seat ${pending.controller} resolves the effect`);
 
-  const kind = targetKind(pending);
-  if (kind === 'none') throw new IllegalActionError('no target is needed for this effect');
-  const targets = validTargets(state, pending.controller, kind);
-  if (!targets.includes(target)) {
-    const owner = kind === 'ownGraveyard' ? pending.controller : other(pending.controller);
-    const zone = kind === 'opponentHand' ? 'hand' : kind === 'opponentBattlefield' ? "battlefield" : "graveyard";
-    throw new IllegalActionError(`target ${target} is not in the ${zone} of seat ${owner}`);
-  }
-
-  const owner = kind === 'ownGraveyard' ? pending.controller : other(pending.controller);
-  switch (kind) {
-    case 'opponentBattlefield':
-      return endTurn(moveTo(state, owner, 'battlefield', 'graveyard', target, null));
-    case 'opponentHand':
-      return endTurn(moveTo(state, owner, 'hand', 'graveyard', target, null));
-    case 'ownGraveyard':
-      return endTurn(moveTo(state, owner, 'graveyard', 'hand', target, null));
-  }
+  const targets = resolveTargets(state, pending);
+  if (targets === null) throw new IllegalActionError('no target is needed for this effect');
+  const owner = other(pending.controller);
+  if (!targets.includes(target)) throw new IllegalActionError(`target ${target} is not in the hand of seat ${owner}`);
+  return endTurn(moveTo(state, owner, 'hand', 'graveyard', target, null));
 }
 
 // --- pass -------------------------------------------------------------------
@@ -497,6 +443,7 @@ export function legalActions(state: GameState, seat: Seat, priv?: ReadonlyMap<Ca
         if (card === undefined) continue;
         switch (land) {
           case 'island':
+          case 'plains':
           case 'swamp':
             draft.push({ type: 'play', card, land });
             break;
@@ -508,17 +455,6 @@ export function legalActions(state: GameState, seat: Seat, priv?: ReadonlyMap<Ca
               draft.push({ type: 'play', card, land });
             } else {
               for (const target of targets) draft.push({ type: 'play', card, land, declaredTarget: target.id });
-            }
-            break;
-          }
-          case 'plains': {
-            const reuseCandidates = state.players[seat].battlefield.filter((s) => s.land !== 'plains');
-            if (reuseCandidates.length === 0) {
-              draft.push({ type: 'play', card, land });
-            } else {
-              for (const target of reuseCandidates) {
-                draft.push({ type: 'play', card, land, declaredTarget: target.id });
-              }
             }
             break;
           }
@@ -560,9 +496,7 @@ export function legalActions(state: GameState, seat: Seat, priv?: ReadonlyMap<Ca
     case 'target': {
       const pending = state.pending;
       if (pending === null || seat !== pending.controller) return [];
-      const kind = targetKind(pending);
-      if (kind === 'none') return [];
-      return validTargets(state, pending.controller, kind).map((id) => ({ type: 'resolveTarget', target: id }) as Action);
+      return (resolveTargets(state, pending) ?? []).map((id) => ({ type: 'resolveTarget', target: id }) as Action);
     }
   }
 }

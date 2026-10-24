@@ -80,14 +80,14 @@ test('Mountain destroys with a meteor; Forest regrows; Swamp reveals then discar
   assert.ok(swamp.cues[4]!.some((c) => c.kind === 'discard' && c.card === hand0[1]!.id && c.seat === 0));
 });
 
-test('Plains announces the land it reuses; a win is its own cue', () => {
+test('a Plains is only announced; a win is its own cue', () => {
   const after = run(createGame(0), OPENING).state;
   const { cues } = run(after, [
     [1, { type: 'pass' }],
     [1, { type: 'grantDrawKey', card: 'p0-slot-06' }],
-    [0, { type: 'play', card: 'p0-slot-01', land: 'plains', declaredTarget: 'p0-slot-00' }],
+    [0, { type: 'play', card: 'p0-slot-01', land: 'plains' }],
     [1, { type: 'resign' }],
   ]);
-  assert.deepEqual(kinds(cues[2]!), ['announce', 'reuse']);
+  assert.deepEqual(kinds(cues[2]!), ['announce']);
   assert.deepEqual(cues[3]!.at(-1), { kind: 'win', seat: 0, reason: 'resign' });
 });

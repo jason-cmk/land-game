@@ -33,6 +33,15 @@ export function landName(land: Land): string {
   return NAMES[land];
 }
 
+/**
+ * A land's mana symbol inside text, as `{forest}`: descriptions name lands by
+ * symbol, as MTG card text does (the chrome draws the token as an icon, see mana.ts).
+ * Only a card's own title spells its name out.
+ */
+export function landIcon(land: Land): string {
+  return `{${land}}`;
+}
+
 /** The prompt for `seat`, given the state, its legal actions, and an optional card picked for targeting. */
 export function promptFor(state: GameState, seat: Seat, actions: readonly Action[], picked: CardId | null = null): Prompt {
   if (state.phase === 'over' && state.winner !== null) {
@@ -63,14 +72,14 @@ export function promptFor(state: GameState, seat: Seat, actions: readonly Action
       const buttons: Choice[] = [];
       for (const action of actions) {
         if (action.type === 'allow') buttons.push({ label: 'Let it resolve', action });
-        if (action.type === 'counter') buttons.push({ label: `Counter: Island + ${landName(action.otherLand)}`, action });
+        if (action.type === 'counter') buttons.push({ label: `Counter: ${landIcon('island')} + ${landIcon(action.otherLand)}`, action });
       }
       return { kind: 'respond', text: respondText(state, seat), buttons };
     }
     case 'target': {
       const targets = new Map<CardId, Action>();
       for (const action of actions) if (action.type === 'resolveTarget') targets.set(action.target, action);
-      return { kind: 'resolve', text: resolveText(state), targets };
+      return { kind: 'resolve', text: resolveText(), targets };
     }
     default:
       return { kind: 'wait', text: waitingText(state, seat) };
@@ -78,9 +87,8 @@ export function promptFor(state: GameState, seat: Seat, actions: readonly Action
 }
 
 function declareText(land: Land): string {
-  if (land === 'mountain') return 'Mountain: choose an opponent land to destroy.';
-  if (land === 'forest') return 'Forest: choose a land in your graveyard to return.';
-  return 'Plains: choose one of your other lands to reuse.';
+  if (land === 'mountain') return `${landIcon('mountain')}: choose an opponent land to destroy.`;
+  return `${landIcon('forest')}: choose a land in your graveyard to return.`;
 }
 
 function respondText(state: GameState, seat: Seat): string {
@@ -88,15 +96,11 @@ function respondText(state: GameState, seat: Seat): string {
   const who = pending.controller === seat ? 'Your' : 'Their';
   const chain = pending.counters === 0 ? '' : ` (${pending.counters} counter${pending.counters === 1 ? '' : 's'} so far)`;
   const verb = pending.counters % 2 === 0 ? 'Counter it?' : 'Counter the counter?';
-  return `${who} ${landName(pending.land)}${targetSuffix(state)}${chain}. ${verb}`;
+  return `${who} ${landIcon(pending.land)}${targetSuffix(state)}${chain}. ${verb}`;
 }
 
-function resolveText(state: GameState): string {
-  const pending = state.pending!;
-  const effect = pending.land === 'plains' ? pending.reuseLand! : pending.land;
-  if (effect === 'swamp') return 'Swamp: choose a card from their hand to discard.';
-  if (effect === 'mountain') return 'Choose an opponent land to destroy.';
-  return 'Choose a land in your graveyard to return.';
+function resolveText(): string {
+  return `${landIcon('swamp')}: choose a card from their hand to discard.`;
 }
 
 function targetSuffix(state: GameState): string {
@@ -105,15 +109,15 @@ function targetSuffix(state: GameState): string {
   const target = [...state.players[0].battlefield, ...state.players[1].battlefield, ...state.players[0].graveyard, ...state.players[1].graveyard].find(
     (s) => s.id === pending.declaredTarget,
   );
-  const verb = pending.land === 'mountain' ? 'destroying' : pending.land === 'forest' ? 'returning' : 'reusing';
-  return target?.land ? `, ${verb} ${landName(target.land)}` : '';
+  const verb = pending.land === 'mountain' ? 'destroying' : 'returning';
+  return target?.land ? `, ${verb} ${landIcon(target.land)}` : '';
 }
 
 function waitingText(state: GameState, seat: Seat): string {
   switch (state.phase) {
     case 'respond': {
       const pending = state.pending!;
-      return pending.controller === seat ? `Your ${landName(pending.land)}: waiting for their response…` : 'Waiting for their response…';
+      return pending.controller === seat ? `Your ${landIcon(pending.land)}: waiting for their response…` : 'Waiting for their response…';
     }
     case 'target':
     case 'revealHand':

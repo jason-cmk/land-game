@@ -3,10 +3,10 @@
 // so a card visibly travels between zones. The table knows no rules: it draws
 // a GameState from one seat's point of view and reports card clicks and drags.
 
-import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
+import { Application, Container, Graphics, Rectangle, Sprite, Text } from 'pixi.js';
 import type { Texture } from 'pixi.js';
 import type { CardId, CardSlot, GameState, Land, Seat } from '../engine/types.ts';
-import { other } from '../engine/types.ts';
+import { LANDS, other } from '../engine/types.ts';
 import { CARD_H, CARD_W, drawBack, drawFace } from './art.ts';
 import type { ChainLink } from './chain.ts';
 import { chainOutcome } from './chain.ts';
@@ -53,7 +53,25 @@ interface Place {
   z: number;
   /** Tilt in radians (the fanned hand of a Swamp reveal); 0 if absent. */
   angle?: number;
+  /** A card in a fan of choices (the graveyard), which pulls out when hovered. */
+  fan?: boolean;
 }
+
+/** The middle row of the table, where plays, chains and fans go. */
+interface MiddleRow {
+  readonly width: number;
+  readonly y: number;
+  readonly rowH: number;
+  readonly cardW: number;
+  readonly scale: number;
+}
+
+/** How long the last hovered card of a fan stays pulled out after the pointer leaves it. */
+const PULL_LINGER_MS = 3000;
+/** How long a finger rests on a card before it shows the card's info instead of tapping it. */
+const LONG_PRESS_MS = 450;
+/** Battlefield piles show at most this many cards; a badge counts the rest. */
+const PILE_DEPTH = 4;
 
 class CardSprite extends Container {
   readonly id: CardId;
@@ -68,9 +86,11 @@ class CardSprite extends Container {
   readonly shine = new Graphics();
   /** 0-1: how far the card has eased into its mouse-hover tilt. */
   hover = 0;
+  /** Whether the hit area currently reaches down to cover a pulled-out card's old spot. */
+  pulledHit = false;
   private readonly textures: CardTextures;
 
-  constructor(id: CardId, textures: CardTextures, onTap: (id: CardId) => void, onHover: (id: CardId | null, pointerType: string) => void, onPress: (id: CardId, event: PointerEvent) => void) {
+  constructor(id: CardId, textures: CardTextures, onTap: (id: CardId, event: PointerEvent) => void, onHover: (id: CardId | null, pointerType: string) => void, onPress: (id: CardId, event: PointerEvent) => void) {
     super();
     this.id = id;
     this.textures = textures;
@@ -86,9 +106,11 @@ class CardSprite extends Container {
     this.addChild(this.glow, this.art, this.shine, shineMask, this.marks);
     this.eventMode = 'static';
     this.cursor = 'pointer';
-    this.on('pointertap', () => onTap(this.id));
+    this.on('pointertap', (event) => onTap(this.id, event.nativeEvent as PointerEvent));
     this.on('pointerdown', (event) => onPress(this.id, event.nativeEvent as PointerEvent));
-    this.on('pointerover', (event) => onHover(this.id, event.pointerType));
+    // Pixi follows the pointer across the whole page: a card under a panel (the counter popup,
+    // the history) is not hovered.
+    this.on('pointerover', (event) => onHover(event.nativeEvent.target instanceof HTMLCanvasElement ? this.id : null, event.pointerType));
     this.on('pointerout', (event) => onHover(null, event.pointerType));
   }
 
@@ -129,7 +151,7 @@ export class Table {
   /** Darkens the table behind a Swamp-revealed hand, fanned in the middle (see swampMoment). */
   private readonly scrim = new Graphics();
   private scrimTarget = 0;
-  private readonly layerLabels: Text[] = [];
+  private readonly layerLabels: Container[] = [];
   /** Light along the side of whoever the game is waiting on; it breathes when that is us. */
   private readonly turnGlow = new Graphics();
   private turnPulse = false;
@@ -141,12 +163,15 @@ export class Table {
   private pointer: { x: number; y: number } | null = null;
   /** The card under the mouse, which tilts toward it. */
   private hovered: CardId | null = null;
+  /** The fan card pulled out by the last hover, until `until` (Infinity while still hovered). */
+  private pulled: { id: CardId; until: number } | null = null;
   private readonly animations = new Set<{ start: number; frame: (elapsedMS: number) => boolean }>();
   private shake = { until: 0, amplitude: 0, duration: 1 };
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private view: TableView | null = null;
   private mounted = false;
   private textures: CardTextures | null = null;
+  private readonly faceUrls = new Map<Land, string>();
   private onCard: (id: CardId) => void = () => {};
   private onHoverCard: (id: CardId | null) => void = () => {};
   private onPointerMove: (x: number, y: number) => void = () => {};
@@ -163,6 +188,8 @@ export class Table {
   private pressDragged = false;
   /** Set when the current press was a long press that showed card info, so its tap is ignored. */
   private longPressed = false;
+  /** The timestamp of the current press's pointerdown event. */
+  private pressedAt = 0;
   private inspectTimer: ReturnType<typeof setTimeout> | undefined;
   private inspecting: CardId | null = null;
   private onInspectCard: (info: { land: Land; box: { x: number; y: number; width: number; height: number } } | null) => void = () => {};
@@ -190,9 +217,12 @@ export class Table {
     this.app.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     // Track the pointer on the canvas element itself, leaving Pixi's event tree to the cards.
     this.app.canvas.addEventListener('pointerleave', () => (this.pointer = null));
+    window.addEventListener('pointerup', this.liftFinger);
     this.app.canvas.addEventListener('pointermove', (event) => {
       const box = this.app.canvas.getBoundingClientRect();
       this.pointer = event.pointerType === 'mouse' ? this.local(event) : null;
+      // A finger sliding across a fan pulls out the card under it (Pixi's over/out do not follow a moving touch).
+      if (event.pointerType !== 'mouse' && event.buttons !== 0 && this.press?.aiming !== true) this.pull(this.cardUnder(this.local(event), null));
       this.onPointerMove((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
     });
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
@@ -211,6 +241,17 @@ export class Table {
     };
     const lands: Land[] = ['forest', 'island', 'mountain', 'plains', 'swamp'];
     return { faces: Object.fromEntries(lands.map((land) => [land, bake(drawFace(land))])) as Record<Land, Texture>, back: bake(drawBack()) };
+  }
+
+  /** A land's card face as an image URL, for the chrome (the choice popup). */
+  faceImage(land: Land): string | null {
+    if (this.textures === null) return null;
+    let url = this.faceUrls.get(land);
+    if (url === undefined) {
+      url = this.app.renderer.extract.canvas(this.textures.faces[land]).toDataURL!();
+      this.faceUrls.set(land, url);
+    }
+    return url;
   }
 
   onCardClick(handler: (id: CardId) => void): void {
@@ -348,19 +389,46 @@ export class Table {
     let furthest = 0;
     for (const sprite of this.cards.values()) {
       if (sprite.target === null) continue;
-      const at = this.rest(sprite.target);
+      const at = this.rest(sprite.target, sprite);
       furthest = Math.max(furthest, Math.hypot(sprite.x - at.x, sprite.y - at.y));
     }
     return furthest;
   }
 
-  /** Where a card is heading, in canvas CSS pixels; null if it is not on the table. */
-  cardPosition(id: CardId): { x: number; y: number } | null {
-    const place = this.cards.get(id)?.target;
-    return place == null ? null : { x: place.x, y: place.y + (place.highlight === 'picked' ? -14 : 0) };
+  /**
+   * A point on a card that no other card covers, in canvas CSS pixels (dev tooling: in an
+   * overlapping hand or fan the middle of a card is often under its neighbour). Falls back
+   * to where the card is heading.
+   */
+  visiblePoint(id: CardId): { x: number; y: number } | null {
+    const sprite = this.cards.get(id);
+    const place = sprite?.target;
+    if (place == null) return null;
+    const centre = this.rest(place, sprite);
+    const half = { x: (BASE_W * place.scale) / 2, y: (BASE_H * place.scale) / 2 };
+    for (const fy of [0, -0.3, 0.3, -0.6, 0.6]) {
+      for (const fx of [0, -0.25, -0.5, -0.75, 0.25, 0.5, 0.75]) {
+        const at = { x: centre.x + fx * half.x, y: centre.y + fy * half.y };
+        if (this.cardUnder(at, null) === id) return at;
+      }
+    }
+    return centre;
   }
 
+  /** Where a card is heading, in canvas CSS pixels; null if it is not on the table. */
+  cardPosition(id: CardId): { x: number; y: number } | null {
+    const sprite = this.cards.get(id);
+    const place = sprite?.target;
+    return place == null ? null : { x: place.x, y: place.y + (place.highlight === 'picked' ? -14 : 0) - this.pullLift(sprite) };
+  }
+
+  /** Lifting a finger leaves the last fan card it pulled out there for a while, to tap. */
+  private readonly liftFinger = (event: PointerEvent): void => {
+    if (event.pointerType !== 'mouse') this.pull(null);
+  };
+
   destroy(): void {
+    window.removeEventListener('pointerup', this.liftFinger);
     this.app.destroy(true, { children: true });
   }
 
@@ -395,6 +463,33 @@ export class Table {
       });
     };
 
+    /**
+     * A battlefield as piles by land type, in a fixed order: each pile cascades
+     * diagonally, newest on top, at most PILE_DEPTH cards deep; a badge counts a deeper pile.
+     */
+    const pile = (slots: readonly CardSlot[], y: number, left: number, right: number): void => {
+      const piles = LANDS.map((land) => slots.filter((s) => s.land === land)).filter((cards) => cards.length > 0);
+      const unknown = slots.filter((s) => s.land === null); // never on a battlefield, but drawn if it were
+      if (unknown.length > 0) piles.push(unknown);
+      const dx = cardW * (compact ? 0.13 : 0.17);
+      const dy = BASE_H * scale * 0.07;
+      const pileW = cardW + dx * (PILE_DEPTH - 1);
+      const n = piles.length;
+      const step = n <= 1 ? 0 : Math.min(pileW + 14 * scale, (right - left - pileW) / (n - 1));
+      const start = (left + right) / 2 - (step * (n - 1)) / 2;
+      piles.forEach((cards, i) => {
+        const shown = Math.min(cards.length, PILE_DEPTH);
+        const x0 = start + step * i - (dx * (shown - 1)) / 2;
+        const y0 = y - (dy * (shown - 1)) / 2;
+        cards.forEach((slot, j) => {
+          const at = Math.max(0, j - (cards.length - shown)); // the oldest hide under the bottom card
+          places.set(slot.id, { x: x0 + dx * at, y: y0 + dy * at, scale, face: slot.land, revealed: false, highlight: highlight(slot.id), peer: false, z: i * 10 + j });
+        });
+        if (cards.length > PILE_DEPTH) this.badge(cards.length, x0 + dx * (shown - 1) + cardW / 2, y0 + dy * (shown - 1) - (BASE_H * scale) / 2, scale);
+      });
+    };
+
+    let fanned: readonly CardSlot[] = [];
     const onStack = new Set(view.chain.flatMap((link) => link.cards));
     const margin = (compact ? 6 : 24) * scale;
     const sideW = cardW * (compact ? 1.2 : 2.2);
@@ -410,11 +505,13 @@ export class Table {
       const handFace = (s: CardSlot): Land | null => s.land ?? (mine ? (view.privateHand.get(s.id) ?? null) : null);
       // Compact rows only keep clear of their own side column: the deck beside the hand, the graveyard beside the field.
       row(hand, handY, compact ? margin : sideW, width - sideW, handFace, (s) => s.land !== null);
-      row(p.battlefield, fieldY, sideW, compact ? width - margin : width - sideW, (s) => s.land, () => false);
+      pile(p.battlefield, fieldY, sideW, compact ? width - margin : width - sideW);
       // Graveyard on the left of the field row, small and fanned; library on the right as a pile.
       // Cards paying for a counter sit in the middle until the chain ends, not in the graveyard yet.
       const graveyard = p.graveyard.filter((s) => !onStack.has(s.id));
-      row(graveyard, fieldY, margin, sideW - margin, (s) => s.land, () => false, 0.6);
+      // Choosing from the graveyard (a Forest): it fans out large in the middle instead.
+      if (mine && graveyard.some((s) => highlight(s.id) === 'target')) fanned = graveyard;
+      else row(graveyard, fieldY, margin, sideW - margin, (s) => s.land, () => false, 0.6);
       p.library.forEach((slot, i) => {
         const lift = Math.min(i, 12) * 0.6;
         places.set(slot.id, { x: width - sideW / 2, y: handY - lift, scale: scale * 0.8, face: null, revealed: false, highlight: 'none', peer: false, z: i });
@@ -427,7 +524,8 @@ export class Table {
     // The land being played sits in the middle until the counter chain ends,
     // except during a Swamp's discard choice, when the revealed hand takes the middle.
     const pending = view.state.pending;
-    const moment = this.swampMoment(view, places, { width, y: rowY(2), rowH, cardW, scale });
+    const middle = { width, y: rowY(2), rowH, cardW, scale };
+    const moment = this.swampMoment(view, places, middle) || this.graveyardFan(view, fanned, places, middle);
     if (pending !== null && !moment) {
       places.set(pending.card, {
         x: width / 2,
@@ -452,12 +550,16 @@ export class Table {
         sprite = new CardSprite(
           id,
           this.textures!,
-          (cid) => {
-            if (!this.pressDragged && !this.longPressed) this.onCard(cid);
+          (cid, event) => {
+            // A busy page can run the long-press timer before it handles a quick tap's release:
+            // the events' own timestamps say how long the finger was really down.
+            const held = event.timeStamp - this.pressedAt;
+            if (!this.pressDragged && !(this.longPressed && held >= LONG_PRESS_MS)) this.onCard(cid);
           },
           (cid, pointerType) => {
             this.onHoverCard(cid);
             if (pointerType === 'mouse') {
+              this.pull(cid ?? null); // a finger pulls fan cards from the canvas's own events (see mount)
               this.hovered = cid;
               this.hoverInspect(cid);
             }
@@ -484,8 +586,12 @@ export class Table {
   private pointerDown(id: CardId, event: PointerEvent): void {
     this.pressDragged = false;
     this.longPressed = false;
+    this.pressedAt = event.timeStamp;
     this.stopInspect();
-    if (event.pointerType !== 'mouse') this.startLongPress(id, event);
+    if (event.pointerType !== 'mouse') {
+      this.pull(id); // the card the finger landed on, as Pixi hit it, so a tap stays on the same card
+      this.startLongPress(id, event);
+    }
     this.startPress(id, event);
   }
 
@@ -516,7 +622,7 @@ export class Table {
       if (this.press?.dragging || !this.inspect(id)) return;
       this.longPressed = true;
       navigator.vibrate?.(10);
-    }, 450);
+    }, LONG_PRESS_MS);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
@@ -524,9 +630,10 @@ export class Table {
 
   /** Report a face-up card's info; false if the card shows its back. */
   private inspect(id: CardId): boolean {
-    const place = this.cards.get(id)?.target;
+    const sprite = this.cards.get(id);
+    const place = sprite?.target;
     if (place == null || place.face === null) return false;
-    const at = this.rest(place);
+    const at = this.rest(place, sprite);
     const width = BASE_W * place.scale;
     const height = BASE_H * place.scale;
     this.inspecting = id;
@@ -564,7 +671,10 @@ export class Table {
       }
       // An aiming finger points the arrow itself; a dragged card is held above the finger.
       const at = press.aiming ? pointer : { x: pointer.x, y: pointer.y + press.lift };
-      if (press.aiming) this.aimTip = at;
+      if (press.aiming) {
+        this.aimTip = at;
+        this.pull(this.cardUnder(at, press.id)); // a finger aiming across a fan pulls out the card it points at
+      }
       else this.localDrag = { id: press.id, ...at };
       this.onDragMoveCard(press.id, at.x / this.app.screen.width, at.y / this.app.screen.height, press.aiming);
     };
@@ -591,12 +701,15 @@ export class Table {
   }
 
   /** The topmost card laid out under a point, ignoring `except`. */
-  private cardUnder(at: { x: number; y: number }, except: CardId): CardId | null {
+  private cardUnder(at: { x: number; y: number }, except: CardId | null): CardId | null {
     let best: CardSprite | null = null;
     for (const sprite of this.cards.values()) {
       const place = sprite.target;
       if (place === null || sprite.id === except) continue;
-      if (Math.abs(at.x - place.x) > (BASE_W * place.scale) / 2 || Math.abs(at.y - place.y) > (BASE_H * place.scale) / 2) continue;
+      // A pulled-out card still covers the spot it rose from.
+      const lift = this.pullLift(sprite);
+      const top = place.y - lift - (BASE_H * place.scale) / 2;
+      if (Math.abs(at.x - place.x) > (BASE_W * place.scale) / 2 || at.y < top || at.y > place.y + (BASE_H * place.scale) / 2) continue;
       if (best === null || sprite.zIndex > best.zIndex) best = sprite;
     }
     return best?.id ?? null;
@@ -648,8 +761,8 @@ export class Table {
     const scale = this.cardScale();
     const dash = -now * 0.06;
     const restOf = (id: CardId): { x: number; y: number } | null => {
-      const place = this.cards.get(id)?.target;
-      return place == null ? null : this.rest(place);
+      const sprite = this.cards.get(id);
+      return sprite?.target == null ? null : this.rest(sprite.target, sprite);
     };
     const lockOn = (from: CardId, tip: { x: number; y: number }, valid: (id: CardId) => boolean): void => {
       const origin = restOf(from);
@@ -680,29 +793,45 @@ export class Table {
   }
 
   /**
-   * A Swamp (or Plains reusing one) waiting for its controller to pick the discard:
-   * the revealed hand fans out large in the middle over a darkened table, labelled
-   * for whoever is looking. Returns whether the moment is on.
+   * A Swamp waiting for its controller to pick the discard: the revealed hand
+   * fans out large in the middle over a darkened table, labelled for whoever
+   * is looking. Returns whether the moment is on.
    */
-  private swampMoment(view: TableView, places: Map<CardId, Place>, at: { width: number; y: number; rowH: number; cardW: number; scale: number }): boolean {
+  private swampMoment(view: TableView, places: Map<CardId, Place>, at: MiddleRow): boolean {
     const { state, seat } = view;
     const pending = state.pending;
-    if (state.phase !== 'target' || pending === null) return false;
-    if (pending.land !== 'swamp' && !(pending.land === 'plains' && pending.reuseLand === 'swamp')) return false;
+    if (state.phase !== 'target' || pending === null || pending.land !== 'swamp') return false;
     const victim = other(pending.controller);
     const order = this.handOrders[victim];
     const hand = order.map((id) => state.players[victim].hand.find((s) => s.id === id)).filter((s): s is CardSlot => s !== undefined);
     if (hand.length === 0 || hand.some((s) => s.land === null)) return false;
+    const picking = pending.controller === seat;
+    this.fan(view, hand, places, at, picking ? 'Their hand, revealed: choose one to discard' : 'Your hand, revealed: they choose one to discard');
+    return true;
+  }
+
+  /** Our graveyard while we choose a land from it (a Forest): fanned large in the middle, like a revealed hand. */
+  private graveyardFan(view: TableView, graveyard: readonly CardSlot[], places: Map<CardId, Place>, at: MiddleRow): boolean {
+    if (graveyard.length === 0) return false;
+    this.fan(view, graveyard, places, at, 'Your graveyard: choose a land');
+    return true;
+  }
+
+  /**
+   * Cards fanned large and slightly tilted across the middle row, over the scrim,
+   * with a label above. A hovered card pulls out of the fan (see pull).
+   */
+  private fan(view: TableView, cards: readonly CardSlot[], places: Map<CardId, Place>, at: MiddleRow, label: string): void {
     const { width, y, rowH, cardW, scale } = at;
     const big = Math.min(1.25, (rowH * 0.95) / BASE_H / scale); // as large as the middle row allows
     const w = cardW * big;
-    const n = hand.length;
+    const n = cards.length;
     const step = n <= 1 ? 0 : Math.min(w * 0.9, (width * 0.9 - w) / (n - 1));
-    hand.forEach((slot, i) => {
+    cards.forEach((slot, i) => {
       const offset = i - (n - 1) / 2;
       places.set(slot.id, {
         x: width / 2 + offset * step,
-        y: y + offset * offset * 4 * scale, // a gentle arc: outer cards sit lower
+        y: y + offset * offset * Math.min(4, 40 / n) * scale, // a gentle arc: outer cards sit lower
         scale: scale * big,
         face: slot.land,
         revealed: false,
@@ -710,12 +839,34 @@ export class Table {
         peer: false,
         z: 160 + i,
         angle: offset * Math.min(0.09, 0.5 / n),
+        fan: true,
       });
     });
-    const picking = pending.controller === seat;
-    const label = picking ? 'Their hand, revealed: choose one to discard' : 'Your hand, revealed: they choose one to discard';
-    this.text(label, width / 2, y - (BASE_H * scale * big) / 2 - 22 * scale, scale, 0xe9dcff, this.layer, 170); // clear of the tilted corners
-    return true;
+    // Clear of the tilted corners and of a card pulled up out of the fan.
+    this.text(label, width / 2, y - (BASE_H * scale * big) * (0.5 + 0.22) - 16 * scale, scale, 0xe9dcff, this.layer, 170);
+  }
+
+  /** Hovering a fan card pulls it out; leaving it starts the linger, so it is still there to click or tap. */
+  private pull(id: CardId | null): void {
+    if (id !== null && this.cards.get(id)?.target?.fan) this.pulled = { id, until: Infinity };
+    else if (this.pulled !== null && this.pulled.until === Infinity) this.pulled = { ...this.pulled, until: performance.now() + PULL_LINGER_MS };
+  }
+
+  /** How far a pulled-out fan card rises (canvas px); 0 for any other card. */
+  private pullLift(sprite: CardSprite | undefined): number {
+    const place = sprite?.target;
+    if (sprite === undefined || place == null || !place.fan || this.pulled?.id !== sprite.id) return 0;
+    return BASE_H * place.scale * 0.22;
+  }
+
+  /** A count on a battlefield pile deeper than it shows, at its top card's corner. */
+  private badge(count: number, x: number, y: number, scale: number): void {
+    // In the cards' layer, over its pile (pile cards sit below z 100, under the scrim at 150).
+    const disc = new Graphics().circle(x, y, 11 * scale).fill(0xf4d35e).stroke({ width: 2 * scale, color: 0x0f1d15 });
+    disc.zIndex = 98;
+    this.layerLabels.push(disc);
+    this.layer.addChild(disc);
+    this.text(String(count), x, y, scale, 0x1a1a1a, this.layer, 99);
   }
 
   /**
@@ -723,7 +874,7 @@ export class Table {
    * and left of it (first counter on the right), leaning toward the payer's
    * side, numbered and labelled by who paid. Under the play: what allowing it now would do.
    */
-  private chainLayout(view: TableView, places: Map<CardId, Place>, at: { width: number; y: number; rowH: number; cardW: number; scale: number }): void {
+  private chainLayout(view: TableView, places: Map<CardId, Place>, at: MiddleRow): void {
     const { width, y, rowH, cardW, scale } = at;
     const centre = width / 2;
     const small = 0.85;
@@ -771,9 +922,9 @@ export class Table {
   }
 
   /** Where a card comes to rest: picked cards lift; a card the opponent is touching leans toward the middle of the table. */
-  private rest(place: Place): { x: number; y: number } {
+  private rest(place: Place, sprite?: CardSprite): { x: number; y: number } {
     const peerLift = place.peer ? (place.y < this.app.screen.height / 2 ? 12 : -12) : 0;
-    return { x: place.x, y: place.y + (place.highlight === 'picked' ? -14 : 0) + peerLift };
+    return { x: place.x, y: place.y + (place.highlight === 'picked' ? -14 : 0) + peerLift - this.pullLift(sprite) };
   }
 
   /** Ease every card toward its target, run effects, shake; frame-rate independent. */
@@ -796,6 +947,7 @@ export class Table {
     }
     this.scrim.alpha += (this.scrimTarget - this.scrim.alpha) * t;
     this.turnGlow.alpha = this.turnPulse ? 0.75 + 0.25 * Math.sin(now / 420) : 1;
+    if (this.pulled !== null && this.pulled.until < now) this.pulled = null;
     this.drawAimNow(now);
     // An opponent drag that stops updating (its end lost on the unreliable channel) lets go.
     if (this.peerDrag !== null && now - this.peerDrag.seen > 600) this.peerDrag = null;
@@ -818,7 +970,13 @@ export class Table {
         sprite.skew.set(0, 0);
         sprite.shine.alpha = 0;
       }
-      sprite.zIndex = local !== null || peer !== null ? 400 : place.z + (place.highlight === 'picked' ? 200 : 0);
+      const lift = this.pullLift(sprite);
+      sprite.zIndex = local !== null || peer !== null ? 400 : place.z + (place.highlight === 'picked' ? 200 : 0) + (lift > 0 ? 30 : 0);
+      if (sprite.pulledHit !== lift > 0) {
+        // Reach down over the spot the card rose from, so the pointer that pulled it stays on it.
+        sprite.pulledHit = lift > 0;
+        sprite.hitArea = lift > 0 ? new Rectangle(-BASE_W / 2, -BASE_H / 2, BASE_W, BASE_H + lift / place.scale) : null;
+      }
       if (local !== null || peer !== null) {
         // A held card follows the pointer: tightly for ours, smoothed for theirs (~20 Hz updates).
         const follow = local !== null ? 1 - Math.pow(0.001, deltaMS / 60) : t;
@@ -830,7 +988,7 @@ export class Table {
         continue;
       }
       if (sprite.holdUntil > now) continue;
-      const at = this.rest(place);
+      const at = this.rest(place, sprite);
       sprite.x += (at.x - sprite.x) * t;
       sprite.y += (at.y - sprite.y) * t;
       const s = sprite.scale.x + (place.scale * (1 + 0.06 * sprite.hover) - sprite.scale.x) * t;

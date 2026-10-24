@@ -26,3 +26,11 @@ test('the panel is kept inside the table at the sides', () => {
   assert.equal(infoPlacement({ x: 0, y: 300, width: 80, height: 112 }, { width: 200, height: 60 }, { width: 400, height: 600 }).x, 8);
   assert.equal(infoPlacement({ x: 360, y: 300, width: 40, height: 56 }, { width: 200, height: 60 }, { width: 400, height: 600 }).x, 192);
 });
+
+test('effect text names lands by symbol, never by word (the title aside)', () => {
+  for (const info of Object.values(CARD_INFO)) {
+    for (const line of info.lines) assert.doesNotMatch(line, /\b(Forest|Island|Mountain|Plains|Swamp)s?\b/, line);
+  }
+  assert.match(CARD_INFO.island.lines.join(' '), /discard this \{island\}/);
+  assert.deepEqual(CARD_INFO.plains.lines, ['When played: draw a card.']);
+});

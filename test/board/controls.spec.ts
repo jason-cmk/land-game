@@ -59,8 +59,8 @@ test('respond prompt lists allow and every counter pair', () => {
   const prompt = promptFor(s, 1, legalActions(s, 1, priv));
   assert.equal(prompt.kind, 'respond');
   assert.ok(prompt.kind === 'respond');
-  assert.deepEqual(prompt.buttons.map((b) => b.label), ['Let it resolve', 'Counter: Island + Forest']);
-  assert.match(prompt.text, /Their Swamp\. Counter it\?/);
+  assert.deepEqual(prompt.buttons.map((b) => b.label), ['Let it resolve', 'Counter: {island} + {forest}']);
+  assert.match(prompt.text, /Their \{swamp\}\. Counter it\?/);
 });
 
 test('game over reads from the viewer’s side', () => {

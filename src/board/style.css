@@ -166,6 +166,109 @@ button.quiet {
   pointer-events: none; /* never steals the pointer from the cards under it */
 }
 
+/* A counter decision: a popup in the middle of the table, over the land being played. */
+#choice {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100% - 32px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  background: rgb(29 52 39 / 97%);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 0 0 100vmax rgb(5 11 7 / 35%), 0 12px 40px rgb(0 0 0 / 60%);
+  animation: choice-in 160ms ease-out;
+}
+
+#choice[hidden] {
+  display: none;
+}
+
+#choice-card {
+  width: 84px;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 50%);
+}
+
+#choice-card[hidden] {
+  display: none;
+}
+
+#choice-text {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+#choice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+#choice-buttons button {
+  margin: 0;
+}
+
+@keyframes choice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #choice {
+    animation: none;
+  }
+}
+
+@media (max-width: 719px) {
+  #choice {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  #choice-card {
+    width: 64px;
+  }
+}
+
+/* A land named in text by its mana symbol (mana.ts). */
+.mana {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.2em;
+  margin: 0 0.05em;
+}
+
+.mana svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 #card-info[hidden] {
   display: none;
 }

@@ -420,14 +420,6 @@ function discard(host: FxHost, card: CardId): void {
   });
 }
 
-/** Plains: a golden halo around the land being reused. */
-function reuse(host: FxHost, card: CardId): void {
-  const at = host.position(card);
-  if (at === null) return;
-  for (let i = 0; i < 2; i++) ring(host, at.x, at.y, 0xffe9a8, 40, 90, 700, 5, i * 250);
-  particles(host, { x: at.x, y: at.y, count: 18, colours: [0xfff3c4, 0xffd56b], speed: [20, 70], size: [1.5, 3], life: [500, 900], gravity: -60, spread: 40 });
-}
-
 /** Swamp reveal: the hand fans out into the middle; each card flashes as it arrives, one after another. */
 function reveal(host: FxHost, cards: readonly CardId[]): void {
   cards.forEach((id, i) => {
@@ -488,9 +480,6 @@ export function playCues(host: FxHost, cues: readonly Cue[], viewer: 0 | 1, stac
         break;
       case 'discard':
         discard(host, cue.card);
-        break;
-      case 'reuse':
-        reuse(host, cue.card);
         break;
       case 'reveal':
         reveal(host, cue.cards);

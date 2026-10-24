@@ -117,11 +117,12 @@ class View {
     return score + this.effectScore(land, target);
   }
 
-  /** What a land's effect is worth now, with its declared target (Plains: the reused land). */
+  /** What a land's effect is worth now, with its declared target. */
   private effectScore(land: Land, target: CardId | undefined): number {
     const opponent = this.state.players[this.opponent];
     switch (land) {
       case 'island':
+      case 'plains':
         return 3;
       case 'swamp':
         return opponent.hand.length > 0 ? 3 : 0;
@@ -130,17 +131,6 @@ class View {
       case 'forest': {
         const back = target === undefined ? null : this.landOf(target);
         return back === null ? 0 : 1 + 5 * gain(this.lands(this.seat), back);
-      }
-      case 'plains': {
-        const reused = target === undefined ? null : this.landOf(target);
-        if (reused === null || reused === 'plains') return 0;
-        // The reused effect's own choice is made later; value it at its best now.
-        if (reused === 'mountain') return opponent.battlefield.length === 0 ? 0 : 2 + 8 * Math.max(...opponent.battlefield.map((s) => loss(opponent.battlefield, s.id)));
-        if (reused === 'forest') {
-          const graveyard = this.state.players[this.seat].graveyard;
-          return graveyard.length === 0 ? 0 : 1 + 5 * Math.max(...graveyard.map((s) => gain(this.lands(this.seat), s.land!)));
-        }
-        return this.effectScore(reused, undefined);
       }
     }
   }
@@ -154,7 +144,7 @@ class View {
     if (pending.land === 'mountain' && pending.declaredTarget !== null) {
       value += loss(this.state.players[other(pending.controller)].battlefield, pending.declaredTarget);
     }
-    if (pending.land === 'swamp' || pending.reuseLand === 'swamp' || pending.reuseLand === 'mountain') value += 1;
+    if (pending.land === 'swamp') value += 1;
     return { wins, value };
   }
 

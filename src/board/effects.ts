@@ -8,15 +8,13 @@ import type { CardId, GameState, Land, Seat, WinReason } from '../engine/types.t
 export type Cue =
   /** A land was played and sits on the stack waiting for responses. */
   | { readonly kind: 'announce'; readonly card: CardId; readonly land: Land; readonly seat: Seat }
-  /** Plains declared which land it reuses. */
-  | { readonly kind: 'reuse'; readonly card: CardId; readonly seat: Seat }
   /** Island + another land paid to counter. */
   | { readonly kind: 'counter'; readonly cards: readonly CardId[]; readonly seat: Seat }
   /** The pending play was countered and goes to the graveyard. */
   | { readonly kind: 'countered'; readonly card: CardId }
   /** The pending play resolved onto the battlefield. */
   | { readonly kind: 'enter'; readonly card: CardId; readonly land: Land; readonly seat: Seat }
-  /** A battlefield land destroyed (Mountain, or Plains reusing Mountain). */
+  /** A battlefield land destroyed (Mountain). */
   | { readonly kind: 'meteor'; readonly card: CardId; readonly seat: Seat }
   /** A land returned from graveyard to hand (Forest). */
   | { readonly kind: 'regrowth'; readonly card: CardId; readonly seat: Seat }
@@ -54,9 +52,6 @@ export function cuesBetween(prev: GameState, next: GameState): Cue[] {
 
   if (pending === null && next.pending !== null) {
     cues.push({ kind: 'announce', card: next.pending.card, land: next.pending.land, seat: next.pending.controller });
-    if (next.pending.land === 'plains' && next.pending.declaredTarget !== null) {
-      cues.push({ kind: 'reuse', card: next.pending.declaredTarget, seat: next.pending.controller });
-    }
   }
 
   const paid: CardId[] = [];

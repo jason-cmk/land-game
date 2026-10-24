@@ -65,14 +65,14 @@ Each basic land triggers an effect when it is played.
 | **Swamp** | Thoughtseize | Look at your opponent's hand and choose a land from it for them to discard. |
 | **Mountain** | Stone Rain | Choose a land your opponent controls and destroy it. |
 | **Island** | Draw / Force of Will | **When played:** draw a card. **From hand (counter):** see below. |
-| **Plains** | Cloudshift | Choose one of your other lands that is not a Plains and reuse its effect. |
+| **Plains** | Draw | Draw a card. |
 
 #### Island counter
 - When your opponent plays a land, you can discard an Island from your hand along with one other land to counter it.
 - A countered land does not enter play, and its effect does not happen. It goes to its owner's graveyard, where a Forest can later return it.
 - Any land play can be countered, including an Island being played for its draw.
 - **Countering a counter:** the player whose land is being countered can respond with their own Island counter (Island plus one other land). This can go back and forth as long as players have the cards. Whoever makes the last counter wins the exchange. An odd number of counters means the land is countered. An even number means it resolves.
-- **What can be countered:** only a land being played from hand. When a Plains reuses another land's effect, that reused effect is not a separate play and cannot be countered by itself. To stop it, counter the Plains when it is played.
+- **What can be countered:** only a land being played from hand, not the effect of a land already in play.
 
 #### What each player knows before deciding to counter
 The rules follow normal Magic stack behaviour: a target chosen when the spell is cast is known, but a choice made when the spell resolves is not.
@@ -82,10 +82,7 @@ The rules follow normal Magic stack behaviour: a target chosen when the spell is
 | Mountain | Yes. The targeted land is known. |
 | Forest | Yes. The land chosen from the graveyard is known. |
 | Swamp | No. The land to discard is chosen as the effect resolves. |
-| Plains | The land being reused is known. Choices made by that land's effect are not. For example, if Plains reuses a Forest, the opponent knows it is a Forest but not which land will be returned. |
-
-#### Plains clarifications
-- Plains can only reuse a land that is not a Plains, so two Plains cannot reuse each other forever to force a draw.
+| Plains | Nothing to reveal: it draws a card. |
 
 ### Clarifications and house rules
 The Ultimate Guard article does not cover the rules below. They come from our decisions, from normal Magic rules, and from other published versions of the game:
@@ -104,8 +101,6 @@ The Ultimate Guard article does not cover the rules below. They come from our de
   - **Forest** with an empty graveyard: no effect.
   - **Mountain** when the opponent has no lands in play: no effect.
   - **Swamp** when the opponent's hand is empty: no effect.
-  - **Plains** with no other non-Plains land in play: no effect.
-  - **Plains** reusing a land whose effect has nothing to act on: no effect.
 
 #### When a win happens
 - Win conditions are checked as soon as a land enters play. If that land completes Domain or Mono, the player wins straight away, before the land's own effect resolves.
@@ -114,11 +109,11 @@ The Ultimate Guard article does not cover the rules below. They come from our de
 
 #### Running out of cards
 - If a player has to draw a card and their deck is empty, that player loses the game. This is the normal Magic rule, and it is what YesTCG uses in their rules. Robopenguins' version instead lets the game continue without drawing, but we are not using that.
-- The same applies to a card drawn by an effect, such as an Island being played.
+- The same applies to a card drawn by an effect, such as an Island or a Plains being played.
 
 ### Historical and community variants (not in use)
 - Island used to be "Scry 2". It was dropped because it was too weak.
-- Plains used to have an Opt effect. Cloudshift replaced it.
+- Plains used to have an Opt effect, then Cloudshift (reuse the effect of one of your other non-Plains lands). Since 2026-10-25 it simply draws a card, like an Island played for its draw.
 - Swamp is the most house-ruled card across playgroups (random discard, opponent chooses, or "Blackmail" where the opponent reveals 3 and you pick 1). We use the Ultimate Guard **Thoughtseize** rule (look at the opponent's full hand and choose 1 to discard) because it gives Swamp a strategic role scouting for Island counters, and the digital board tracks revealed cards automatically so it never slows the game down.
 
 ## Technical direction

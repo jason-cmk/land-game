@@ -1,5 +1,6 @@
 // What each land does, shown when a face-up card is hovered (mouse) or
-// long-pressed (touch). Wording follows spec.md § Land abilities.
+// long-pressed (touch). Wording follows spec.md § Land abilities; lands are
+// named by their mana symbol ({island}, see controls.ts landIcon), the card's title aside.
 
 import type { Land } from '../engine/types.ts';
 
@@ -14,11 +15,11 @@ export const CARD_INFO: Record<Land, CardInfo> = {
     name: 'Island',
     lines: [
       'When played: draw a card.',
-      "From hand: when your opponent plays a land, discard this Island and one other land to counter it. The player being countered can counter back the same way.",
+      "From hand: when your opponent plays a land, discard this {island} and one other land to counter it. The player being countered can counter back the same way.",
     ],
   },
   mountain: { name: 'Mountain', lines: ['When played: choose a land your opponent controls and destroy it.'] },
-  plains: { name: 'Plains', lines: ['When played: choose one of your other lands that is not a Plains and reuse its effect.'] },
+  plains: { name: 'Plains', lines: ['When played: draw a card.'] },
   swamp: { name: 'Swamp', lines: ["When played: look at your opponent's hand and choose a land for them to discard."] },
 };
 

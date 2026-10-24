@@ -9,7 +9,7 @@ import { apply, createGame } from '../engine/game.ts';
 import type { CardId, GameState, Land, Seat } from '../engine/types.ts';
 import { toEngineAction } from '../match/protocol.ts';
 import type { LoggedAction } from '../match/protocol.ts';
-import { landName } from './controls.ts';
+import { landIcon } from './controls.ts';
 import { cuesBetween } from './effects.ts';
 
 /** One line of history; `seat` is who acted (null for outcomes nobody chose). */
@@ -60,7 +60,7 @@ export function matchHistory(log: readonly HistoryStep[], viewer: Seat, known: (
   /** "your Forest", or "their land" if somehow not public. */
   const cardName = (s: GameState, id: CardId): string => {
     const land = landOf(s, id);
-    return `${possessive(ownerOf(id))} ${land === null ? 'land' : landName(land)}`;
+    return `${possessive(ownerOf(id))} ${land === null ? 'land' : landIcon(land)}`;
   };
 
   for (const entry of log.slice(1)) {
@@ -74,27 +74,23 @@ export function matchHistory(log: readonly HistoryStep[], viewer: Seat, known: (
       break; // a log the engine refuses cannot be described past this point
     }
     const pending = before.pending;
-    /** The play an effect belongs to, e.g. "Your Mountain" or "Their Plains (as Forest)". */
-    const source = (): string => {
-      if (pending === null) return 'It';
-      const reused = pending.land === 'plains' && pending.reuseLand !== null ? ` (as ${landName(pending.reuseLand)})` : '';
-      return `${you(pending.controller) ? 'Your' : 'Their'} ${landName(pending.land)}${reused}`;
-    };
+    /** The play an effect belongs to, e.g. "Your {mountain}". */
+    const source = (): string => (pending === null ? 'It' : `${you(pending.controller) ? 'Your' : 'Their'} ${landIcon(pending.land)}`);
 
     switch (action.type) {
       case 'play': {
         const land = action.reveal.land;
         const target = action.declaredTarget;
-        let text = `${subject(seat)} played ${landName(land)}`;
+        let text = `${subject(seat)} played ${landIcon(land)}`;
         if (target !== undefined) {
-          const verb = land === 'mountain' ? 'aiming at' : land === 'forest' ? 'to return' : 'reusing';
+          const verb = land === 'mountain' ? 'aiming at' : 'to return';
           text += `, ${verb} ${cardName(before, target)}`;
         }
         say(before, seat, `${text}.`);
         break;
       }
       case 'counter':
-        say(before, seat, `${subject(seat)} countered with Island + ${landName(action.other.land)}.`);
+        say(before, seat, `${subject(seat)} countered with ${landIcon('island')} + ${landIcon(action.other.land)}.`);
         break;
       case 'allow':
         say(before, seat, `${subject(seat)} let it resolve.`);
@@ -106,7 +102,7 @@ export function matchHistory(log: readonly HistoryStep[], viewer: Seat, known: (
         say(before, seat, `${subject(seat)} resigned.`);
         break;
       case 'revealHandForSwamp': {
-        const lands = action.cards.map((c) => landName(c.land));
+        const lands = action.cards.map((c) => landIcon(c.land));
         say(before, seat, `${subject(seat)} revealed ${possessive(seat)} hand: ${lands.length === 0 ? 'empty' : lands.join(', ')}.`);
         break;
       }
@@ -123,7 +119,7 @@ export function matchHistory(log: readonly HistoryStep[], viewer: Seat, known: (
         case 'draw': {
           // A draw that starts a turn belongs to that turn, so it is filed under the state after it.
           const land = you(cue.seat) ? (landOf(state, cue.card) ?? known(cue.card)) : null;
-          say(state, cue.seat, `${subject(cue.seat)} drew ${land === null ? 'a card' : landName(land)}.`);
+          say(state, cue.seat, `${subject(cue.seat)} drew ${land === null ? 'a card' : landIcon(land)}.`);
           break;
         }
         case 'countered':
@@ -140,7 +136,7 @@ export function matchHistory(log: readonly HistoryStep[], viewer: Seat, known: (
           break;
         case 'discard': {
           const land = landOf(state, cue.card);
-          say(before, null, `${source()} made ${you(cue.seat) ? 'you' : 'them'} discard ${land === null ? 'a card' : landName(land)}.`);
+          say(before, null, `${source()} made ${you(cue.seat) ? 'you' : 'them'} discard ${land === null ? 'a card' : landIcon(land)}.`);
           break;
         }
         case 'win': {
@@ -149,7 +145,7 @@ export function matchHistory(log: readonly HistoryStep[], viewer: Seat, known: (
           break;
         }
         default:
-          break; // announce, reuse, counter and reveal are already said by the action line
+          break; // announce, counter and reveal are already said by the action line
       }
     }
   }

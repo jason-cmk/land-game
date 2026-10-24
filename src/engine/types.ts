@@ -44,10 +44,8 @@ export interface PendingPlay {
   readonly card: CardId;
   readonly land: Land;
   readonly controller: Seat;
-  /** Target declared at announcement (Mountain / Forest / Plains-reuse). */
+  /** Target declared at announcement (Mountain / Forest). */
   readonly declaredTarget: CardId | null;
-  /** For Plains only: the land type being reused. */
-  readonly reuseLand: Land | null;
   /** Counters played so far in the response chain. */
   readonly counters: number;
 }
@@ -56,7 +54,7 @@ export type Phase =
   | 'main' // active player: play or pass; opponent: nothing
   | 'respond' // counter chain; responder derived from pending.counters parity
   | 'revealHand' // opponent of a resolving Swamp must reveal their hand
-  | 'target' // controller of a resolving Plains-reused effect picks a target
+  | 'target' // controller of a resolving Swamp picks the discard
   | 'drawKey' // a card was drawn; the other seat must grant the key
   | 'over';
 
@@ -65,7 +63,7 @@ export interface DrawRequest {
   readonly seat: Seat;
   readonly card: CardId;
   /** What happens once the key is granted. */
-  readonly purpose: 'turnStart' | 'islandDraw';
+  readonly purpose: 'turnStart' | 'effectDraw';
 }
 
 export interface GameState {
@@ -89,7 +87,7 @@ export type Action =
   | { readonly type: 'allow' }
   /** Thoughtseize reveal: the opponent reveals their entire hand. */
   | { readonly type: 'revealHandForSwamp'; readonly cards: ReadonlyArray<{ readonly card: CardId; readonly land: Land }> }
-  /** Choose a target during 'target' phase (Plains-reused Mountain/Forest, or Swamp discard). */
+  /** Choose a target during 'target' phase (the Swamp discard). */
   | { readonly type: 'resolveTarget'; readonly target: CardId }
   | { readonly type: 'resign' };
 

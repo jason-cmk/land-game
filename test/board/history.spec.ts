@@ -31,27 +31,27 @@ const text = (turns: HistoryTurn[]): string[] => turns.flatMap((t) => t.lines.ma
 test('the history reads from the viewer seat, naming only its own draws', () => {
   const known = (id: CardId): Land | null => (id === 'p0-slot-05' ? 'swamp' : null);
   assert.deepEqual(text(matchHistory(LOG, 0, known)), [
-    '1: You played Island.',
+    '1: You played {island}.',
     '1: They let it resolve.',
-    '1: Your Island entered play.',
-    '1: You drew Swamp.',
+    '1: Your {island} entered play.',
+    '1: You drew {swamp}.',
     '2: They drew a card.',
-    '2: They played Mountain, aiming at your Island.',
-    '2: You countered with Island + Forest.',
+    '2: They played {mountain}, aiming at your {island}.',
+    '2: You countered with {island} + {forest}.',
     '2: They let it resolve.',
-    '2: Their Mountain was countered.',
+    '2: Their {mountain} was countered.',
     '3: You drew a card.', // not yet unlocked for seat 0, so not named
   ]);
   assert.deepEqual(text(matchHistory(LOG, 1, () => 'plains')), [
-    '1: They played Island.',
+    '1: They played {island}.',
     '1: You let it resolve.',
-    '1: Their Island entered play.',
+    '1: Their {island} entered play.',
     '1: They drew a card.',
-    '2: You drew Plains.',
-    '2: You played Mountain, aiming at their Island.',
-    '2: They countered with Island + Forest.',
+    '2: You drew {plains}.',
+    '2: You played {mountain}, aiming at their {island}.',
+    '2: They countered with {island} + {forest}.',
     '2: You let it resolve.',
-    '2: Your Mountain was countered.',
+    '2: Your {mountain} was countered.',
     '3: They drew a card.',
   ]);
 });

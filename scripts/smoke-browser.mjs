@@ -177,7 +177,7 @@ try {
         writeFileSync(`${OUT}/${file}`, Buffer.from(data, 'base64'));
       },
     };
-    for (let i = 0; i < 50 && (await tab.eval('document.readyState')) !== 'complete'; i++) await sleep(100);
+    for (let i = 0; i < 200 && (await tab.eval('document.readyState')) !== 'complete'; i++) await sleep(100); // a click before the page's module runs just reloads the lobby
     return tab;
   }
 
@@ -228,6 +228,7 @@ try {
       const buttons = s.buttons.filter((b) => b !== 'Resign' && b !== 'Cancel' && b !== 'New match');
       const useCard = s.cards.length > 0 && (buttons.length === 0 || rand() < 0.8);
       const before = s.log;
+      let attempt = '';
       if (useCard) {
         const pick = Math.floor(rand() * s.cards.length);
         // Clicks hit cards where they are drawn: wait until nothing is still gliding (a freshly
@@ -241,7 +242,9 @@ try {
         // Positions read before settling can be stale: a phone's status bar re-wrapping resizes the table.
         const fresh = await tab.eval('window.__landGame.clickables().cards');
         const card = fresh.find((c) => c.id === s.cards[pick].id) ?? s.cards[pick];
+        attempt = `${s.kind}: ${card.id} at ${Math.round(card.x)},${Math.round(card.y)}`;
         if (s.kind === 'main' && rand() < 0.5) {
+          attempt = `drag ${attempt}`;
           // Drag it onto the middle of the table; the other tab should see it move.
           const middle = await tab.eval(`(() => { const r = document.getElementById('table').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
           const peer = tabs.length > 1 ? tabs[1 - i] : null;
@@ -254,16 +257,24 @@ try {
           });
           cardDrags++;
         } else {
+          attempt = `click ${attempt}`;
           await tab.click(card.x, card.y);
           cardClicks++;
         }
       } else if (buttons.length > 0) {
         const label = buttons[Math.floor(rand() * buttons.length)];
-        await tab.eval(`[...document.querySelectorAll('#buttons button')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
+        attempt = `button ${label}`;
+        await tab.eval(`[...document.querySelectorAll('#buttons button, #choice button')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
         buttonClicks++;
       }
       // Either the move went through (log grows) or a card pick opened targeting (prompt changes).
-      await waitFor(tabs, (now) => now[i].log > before || now[i].kind !== s.kind || now.every((x) => x.status === 'over'), 5000, `${tag} move ${moves}`);
+      try {
+        await waitFor(tabs, (now) => now[i].log > before || now[i].kind !== s.kind || now.every((x) => x.status === 'over'), 5000, `${tag} move ${moves}`);
+      } catch (err) {
+        // Show what was tried and what the table looked like when it went nowhere.
+        await tab.shot(`${tag}-stuck-${tab.name}.png`);
+        throw new Error(`${err.message}; ${tab.name} tried ${attempt}; offered ${JSON.stringify(await tab.eval('window.__landGame.clickables()'))}`);
+      }
       if (moves === 12) for (const t of tabs) await t.shot(`${tag}-mid-${t.name}.png`);
     }
     if (tabs.length > 1 && cardDrags > 0 && !peerSawDrag) throw new Error(`${tag}: the opponent never saw a drag`);
@@ -308,10 +319,11 @@ try {
   await setup([c, d], 'reload');
   await playByClicking([c, d], 10, 'reload');
   const beforeReload = await state(d);
-  await d.eval(`location.reload()`);
+  await d.reload();
   // Wait for the page's module to run: a click before that submits the bare form, which just reloads again.
   await d.front();
-  for (let waited = 0; (await d.eval('document.readyState').catch(() => 'loading')) !== 'complete'; waited += 100) {
+  // The lobby shows only on the fresh page (the old one, which may still answer, shows the table).
+  for (let waited = 0; !(await d.eval(`document.readyState === 'complete' && !document.getElementById('lobby').hidden`).catch(() => false)); waited += 100) {
     if (waited > 10000) throw new Error('reload: the page never finished loading');
     await sleep(100);
   }
@@ -352,7 +364,7 @@ try {
   await e.shot('online-invite.png');
   await e.eval(`document.getElementById('reply-code').value = ${JSON.stringify(reply)}; document.getElementById('accept').click()`);
   await setup([e, f], 'webrtc');
-  await playByClicking([e, f], 25, 'online');
+  await playByClicking([e, f], 15, 'online'); // few enough that the drop and reload checks below still land mid-game
   const online = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'webrtc: heads converge');
   log('online: log', online.map((s) => s.log), 'heads equal', online[0].head === online[1].head);
   for (const t of [e, f]) await t.shot(`online-${t.name}.png`);
@@ -391,7 +403,7 @@ try {
 
   log('== online: a tab reloads mid-game');
   if (afterDrop.some((x) => x.status === 'over')) throw new Error('match ended before the reload check; raise the move budget');
-  await f.eval('location.reload()');
+  await f.reload();
   await poll(f, `document.readyState === 'complete' && !document.getElementById('resume').hidden`, 'lobby offers to resume');
   await poll(e, `!document.getElementById('reconnect').hidden`, 'peer sees the drop');
   await f.shot('online-resume-lobby.png');
@@ -485,7 +497,7 @@ try {
   if (phoneHistory.length === 0 || panel.right > panel.width || panel.bottom > panel.height * 0.8) throw new Error('phone: history panel does not fit');
   await g.eval(`document.getElementById('history-close').click()`);
   // The desktop tab hovers one of its own hand cards: the info appears, then goes when the mouse leaves.
-  const deskCard = await h.eval(`(() => { const g = window.__landGame; const id = g.coordinator.state.players[1].hand[0]?.id; return id ? g.cardAt(id) : null; })()`);
+  const deskCard = await h.eval(`(() => { const g = window.__landGame; const s = g.coordinator.state; const id = s.players[1].hand.find((c) => c.id !== s.pending?.card)?.id; return id ? g.cardAt(id) : null; })()`);
   if (deskCard !== null) {
     await h.hover(deskCard.x, deskCard.y);
     let hoverInfo = null;
@@ -521,7 +533,7 @@ try {
   await setup([solo], 'computer, second match');
   await playByClicking([solo], 8, 'computer-reload');
   const beforeSoloReload = await state(solo);
-  await solo.eval('location.reload()');
+  await solo.reload();
   await poll(solo, `document.readyState === 'complete' && document.getElementById('computer')?.textContent === 'Carry on'`, 'computer: lobby offers to carry on');
   await solo.shot('computer-resume-lobby.png');
   await solo.eval(`document.getElementById('computer').click()`);
