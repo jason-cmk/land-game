@@ -308,6 +308,7 @@ Implementations:
 
 One `MatchCoordinator` per seat runs setup, play and audit over a `Transport`. The board calls `legalActions()` and `submit(action)` with plain engine actions; the coordinator attaches keys, verifies everything the peer sends, and keeps the log.
 
+- **Listener errors are ours, not the peer's.** An exception thrown by an `onChange` listener goes to `onListenerError` (default: rethrown on a fresh task), never into the failure policy.
 - **Forced moves are automatic.** Granting a draw key and revealing a hand to Swamp have exactly one legal move, so the coordinator sends them itself.
 - **Failure policy:**
   - Head hash or sequence mismatch, version or modulus mismatch: **void**. Nobody can tell which side diverged, so there is no result.

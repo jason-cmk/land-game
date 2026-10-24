@@ -87,7 +87,14 @@ export interface CoordinatorOptions {
   readonly rand?: RandomBytes;
   /** Called synchronously with a fresh snapshot before each action is sent. */
   readonly persist?: (snapshot: Snapshot) => void;
+  /** Where errors thrown by onChange listeners go. Default: rethrown on a fresh task. */
+  readonly onListenerError?: (err: unknown) => void;
 }
+
+const rethrowLater = (err: unknown): void =>
+  queueMicrotask(() => {
+    throw err;
+  });
 
 /** The two logs disagree; the match cannot continue and has no result. */
 class DesyncError extends Error {
@@ -110,6 +117,7 @@ export class MatchCoordinator {
   private readonly p: bigint;
   private readonly rand: RandomBytes;
   private readonly persist: ((snapshot: Snapshot) => void) | undefined;
+  private readonly onListenerError: (err: unknown) => void;
   private transport: Transport<Message>;
   private unsubscribe: (() => void) | null = null;
   private readonly listeners = new Set<() => void>();
@@ -147,13 +155,14 @@ export class MatchCoordinator {
     this.rand = options.rand ?? defaultRandomBytes;
     if (!isSafePrime(this.p, this.rand)) throw new Error('the SRA modulus must be a safe prime');
     this.persist = options.persist;
+    this.onListenerError = options.onListenerError ?? rethrowLater;
     this.transport = options.transport;
     this.mySeed = Array.from(this.rand(16), (b) => b.toString(16).padStart(2, '0')).join('');
     this.canonical = [this.canonicalIndex(0), this.canonicalIndex(1)];
   }
 
   /** Rebuild a coordinator from a snapshot and reconnect it to the peer. */
-  static resume(snapshot: Snapshot, transport: Transport<Message>, options: Pick<CoordinatorOptions, 'rand' | 'persist'> = {}): MatchCoordinator {
+  static resume(snapshot: Snapshot, transport: Transport<Message>, options: Pick<CoordinatorOptions, 'rand' | 'persist' | 'onListenerError'> = {}): MatchCoordinator {
     const coordinator = new MatchCoordinator({ ...options, seat: snapshot.seat, prime: fromHex(snapshot.prime), transport });
     coordinator.replay(snapshot);
     coordinator.reconnect(transport);
@@ -310,8 +319,19 @@ export class MatchCoordinator {
     this.emit();
   }
 
+  /**
+   * Notify listeners. A listener's error is a bug on our side, never the
+   * peer's: report it outside the message handler so it cannot be mistaken
+   * for a failed verification.
+   */
   private emit(): void {
-    for (const listener of [...this.listeners]) listener();
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.onListenerError(err);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

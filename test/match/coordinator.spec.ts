@@ -157,6 +157,22 @@ test('resign ends the match and still runs the audit', async () => {
   }
 });
 
+test('a throwing change listener is not blamed on the peer', async () => {
+  const reported: unknown[] = [];
+  const [t0, t1] = createMemoryPair<Message>();
+  const c0 = new MatchCoordinator({ seat: 0, prime: PRIME, transport: t0, rand: seededRandomBytes(15), onListenerError: (e) => reported.push(e) });
+  const c1 = new MatchCoordinator({ seat: 1, prime: PRIME, transport: t1, rand: seededRandomBytes(16) });
+  c0.onChange(() => {
+    throw new Error('board bug');
+  });
+  c0.start();
+  c1.start();
+  await settle();
+  assert.equal(c0.status, 'playing');
+  assert.equal(c1.status, 'playing');
+  assert.ok(reported.some((e) => e instanceof Error && e.message === 'board bug'), 'the error still surfaces');
+});
+
 test('an illegal local submit throws and sends nothing', async () => {
   const { coordinators } = await startMatch(3);
   const waiting = coordinators.find((c) => c.legalActions().length === 0)!;
