@@ -4,7 +4,7 @@ Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last update
 
 ## Summary
 
-Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. The WebRTC path is tested against a fake `RTCPeerConnection` only. No visuals yet.
+Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A first playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome.
 
 | Layer | Path | Status |
 | --- | --- | --- |
@@ -16,9 +16,9 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Match: coordinator (setup, lockstep, audit, reconnect) | `src/match/coordinator.ts` | Done |
 | Transport: interface + in-memory pair | `src/transport/` | Done |
 | Transport: BroadcastChannel (two tabs) | `src/transport/broadcast.ts` | Done |
-| Transport: WebRTC (copy-paste codes, two data channels) | `src/transport/webrtc.ts`, `signal.ts` | Done; untested in a real browser |
-| Board (DOM UI) | `src/board/` | Not started |
-| Design doc | `docs/design/design.md` | Stub |
+| Transport: WebRTC (copy-paste codes, two data channels) | `src/transport/webrtc.ts`, `signal.ts` | Done |
+| Board: first slice (PixiJS table, HTML chrome, lobby) | `src/board/`, `index.html` | Done |
+| Design doc | `docs/design/design.md` | First pass |
 
 ## Done
 
@@ -29,19 +29,21 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Crypto hardening**: card values are squares (quadratic residues) and the modulus is a safe prime (`DEFAULT_PRIME`, 256-bit), closing a leak where each hidden card's quadratic-residue bit was public and correlated with its land. The coordinator refuses non-safe moduli. Also fixed `generatePrime` looping forever on bit lengths that are not a multiple of 8.
 - **Engine fix**: the land being played could be spent to pay for its controller's own counter-counter, crashing the later `allow`. Found by coordinator random play.
 - **Transports**: WebRTC with copy-paste invite/reply codes (non-trickle ICE, pre-negotiated `game` and `presence` channels), BroadcastChannel for two tabs (reload-safe hello/ack), and a `PeerTransport` interface adding presence and status. Details in `tech.md` § Transport interface.
-- **Tests**: 91 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
+- **Board, first slice**: Vite + PixiJS. Lobby for two tabs (room + seat) or online (invite/reply codes); status bar with prompt and choice buttons; table with all zones, gliding cards, gold/red highlights for playable cards and targets, tab-reload resume via `sessionStorage`. Prompts come from a pure `src/board/controls.ts` (unit-tested). Checked in headless Chrome by clicking through: a full two-tab match to a Domain win, a mid-game tab reload, and a real WebRTC connection between two tabs, with no console errors.
+- **Coordinator fix found in the browser**: an exception in an `onChange` listener was caught by the message handler and treated as the peer failing verification, so a UI bug forfeited the match. Listener errors now go to `onListenerError` (default: rethrown on a fresh task).
+- **Tests**: 96 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
-- **Tooling**: `npm run typecheck`, `npm test`, `npm run demo`. Node 24 type stripping, no runtime dependencies.
+- **Tooling**: `npm run dev` (Vite), `npm run build`, `npm run typecheck` (two configs: no-DOM layers, DOM board), `npm test`, `npm run demo`. Node 24 type stripping; one runtime dependency (PixiJS).
 
 ## Not done
 
-1. **Real-browser WebRTC check**: needs a page; do it with the first board build.
-2. **`src/board/`**: DOM rendering of hand, battlefield, graveyard, counter and target prompts, Swamp reveal view, signalling UI, snapshot storage for reconnect.
-3. **`docs/design/design.md`**: UI/UX design is still a stub.
+1. **Board polish**: effect animations per land, drag-to-play, presence signals (hover/drag) over the presence channel, card art, a clearer counter-chain display, Swamp reveal moment.
+2. **WebRTC reconnect UI**: a dropped online match needs a fresh invite/reply exchange, then `coordinator.reconnect()`; there is no UI for it yet.
+3. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
 
 ## Next step
 
-The board, starting with the design doc (still a stub) and a minimal page that runs a match over the BroadcastChannel transport, then WebRTC.
+Board polish: pick from the list above. Effect animations and presence are the biggest steps toward the spec's goal of feeling like a real table.
 
 ## Open items and risks
 

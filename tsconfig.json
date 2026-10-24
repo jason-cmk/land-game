@@ -16,5 +16,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "demo/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "demo/**/*.ts"],
+  "exclude": ["src/board/**"]
 }

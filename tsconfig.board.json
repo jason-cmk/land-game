@@ -1,0 +1,10 @@
+{
+  // The board is the only layer allowed DOM access (see tech.md, Layering).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"]
+  },
+  "include": ["src/board/**/*.ts"],
+  "exclude": []
+}

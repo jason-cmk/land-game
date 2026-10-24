@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Land Game</title>
+  </head>
+  <body>
+    <main id="lobby">
+      <h1>Land Game</h1>
+
+      <section>
+        <h2>Two tabs on this computer</h2>
+        <form id="tabs-form">
+          <label>Room <input id="room" value="table" autocomplete="off" /></label>
+          <button type="submit" value="0">Take seat 1</button>
+          <button type="submit" value="1">Take seat 2</button>
+        </form>
+        <p class="hint">Open this page in a second tab and take the other seat.</p>
+      </section>
+
+      <section>
+        <h2>Online</h2>
+        <button id="invite" type="button">Create an invite</button>
+        <div class="join">
+          <textarea id="invite-code" rows="3" placeholder="…or paste an invite code here"></textarea>
+          <button id="join" type="button">Join</button>
+        </div>
+        <div id="code-out" hidden>
+          <p id="code-caption"></p>
+          <textarea id="code" rows="4" readonly></textarea>
+          <button id="copy-code" type="button">Copy</button>
+        </div>
+        <div id="reply-row" hidden>
+          <textarea id="reply-code" rows="3" placeholder="Paste their reply code"></textarea>
+          <button id="accept" type="button">Connect</button>
+        </div>
+      </section>
+
+      <p id="lobby-message" role="status"></p>
+    </main>
+
+    <section id="game" hidden>
+      <header id="bar">
+        <span id="prompt" role="status"></span>
+        <div id="buttons"></div>
+      </header>
+      <div id="table"></div>
+    </section>
+
+    <script type="module" src="/src/board/main.ts"></script>
+  </body>
+</html>

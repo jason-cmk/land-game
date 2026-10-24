@@ -1,0 +1,126 @@
+:root {
+  --felt: #14261c;
+  --panel: #1d3427;
+  --ink: #e6ede6;
+  --muted: #9fb3a3;
+  --accent: #f4d35e;
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--felt);
+  color: var(--ink);
+}
+
+#lobby {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px 16px;
+}
+
+#lobby section {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+h1 {
+  font-family: Georgia, serif;
+  margin-top: 0;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: 0 0 12px;
+}
+
+label {
+  margin-right: 8px;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: #0f1d15;
+  border: 1px solid #355a43;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+textarea {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  margin: 8px 0;
+  word-break: break-all;
+}
+
+button {
+  font: inherit;
+  color: #1a1a1a;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  margin: 2px 4px 2px 0;
+}
+
+button.quiet {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid #355a43;
+}
+
+.hint,
+#lobby-message {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+#game {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#game[hidden],
+#lobby[hidden] {
+  display: none;
+}
+
+#bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  min-height: 52px;
+}
+
+#prompt {
+  flex: 1 1 260px;
+}
+
+#table {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+#table canvas {
+  display: block;
+}

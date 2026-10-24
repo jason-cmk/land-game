@@ -5,7 +5,10 @@
   "type": "module",
   "description": "Web implementation of the Basic Land Game (MTG homebrew variant)",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.board.json",
     "test": "node --test 'test/**/*.spec.ts'",
     "demo": "node demo/demo.ts"
   },
@@ -14,6 +17,10 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7"
+  },
+  "dependencies": {
+    "pixi.js": "^8.22.0"
   }
 }

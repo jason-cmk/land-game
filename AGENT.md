@@ -17,12 +17,15 @@ Read these before changing behaviour. The spec is the source of truth; anything 
 - `src/match/`: hash chain log, SRA deck protocol, lockstep coordinator
 - `src/transport/`: transport interface, in-memory pair, BroadcastChannel, WebRTC
 - `test/`: `node:test` specs
+- `src/board/`, `index.html`: the player board (PixiJS table, HTML chrome)
 - `demo/demo.ts`: CLI demo of a scripted match
 
 ## Commands
 
-Node 24+ (native TypeScript type stripping), no runtime dependencies.
+Node 24+ (native TypeScript type stripping). Runtime dependency: PixiJS (board only). Vite for dev and build.
 
+- `npm run dev`: board at http://localhost:5173 (open two tabs to play)
+- `npm run build`
 - `npm run typecheck`
 - `npm test`
 - `npm run demo`
