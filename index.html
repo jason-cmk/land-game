@@ -51,9 +51,17 @@
       <header id="bar">
         <span id="prompt" role="status"></span>
         <div id="buttons"></div>
+        <button id="history-toggle" type="button" class="quiet" aria-controls="history" aria-expanded="false" title="History">📜</button>
       </header>
       <div id="table">
         <div id="card-info" role="tooltip" hidden></div>
+        <section id="history" aria-label="Match history" hidden>
+          <header>
+            <h2>History</h2>
+            <button id="history-close" type="button" class="quiet" aria-label="Close history">✕</button>
+          </header>
+          <ol id="history-list"></ol>
+        </section>
         <section id="reconnect" hidden>
           <h2>The connection dropped</h2>
           <div id="reconnect-panel"></div>

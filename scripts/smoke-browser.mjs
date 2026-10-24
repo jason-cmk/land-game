@@ -248,6 +248,15 @@ try {
   log('final', end.map((s) => ({ status: s.status, log: s.log, outcome: s.outcome, prompt: s.prompt })));
   log('heads equal', end[0].head === end[1].head);
   if (end[0].head !== end[1].head || end.some((s) => s.outcome?.kind !== 'win')) throw new Error('two-tab match did not finish in agreement');
+  // The history panel tells the match from each seat, ending with the result, never naming the other side's draws.
+  const histories = await Promise.all([a, b].map((t) => t.eval('window.__landGame.history()')));
+  for (const t of [a, b]) await t.shot(`tabs-history-${t.name}.png`);
+  log('history lines', histories.map((h) => h.length), 'last', histories.map((h) => h.at(-1)));
+  for (const h of histories) {
+    if (h.length < 10 || !/win by/.test(h.at(-1))) throw new Error('history does not end with the result');
+    if (h.some((line) => line.startsWith('They drew') && line !== 'They drew a card.')) throw new Error('history names an opponent draw');
+  }
+  if (histories[0].length !== histories[1].length) throw new Error('the two seats tell different histories');
 
   // --- Reload mid-game (two tabs) ----------------------------------------------------
   log('== reload a tab mid-game');
@@ -380,12 +389,22 @@ try {
   const phone = await waitFor([g, h], (s) => s[0].head === s[1].head, 10000, 'phone: heads converge');
   log('phone: log', phone.map((s) => s.log), 'heads equal', phone[0].head === phone[1].head);
   await g.shot('phone-mid.png');
+  // The history panel opens over the phone's table and leaves its hand reachable.
+  const phoneHistory = await g.eval('window.__landGame.history()');
+  const panel = await g.eval(`(() => { const r = document.getElementById('history').getBoundingClientRect(); return { bottom: r.bottom, right: r.right, width: innerWidth, height: innerHeight }; })()`);
+  await g.shot('phone-history.png');
+  log('phone: history lines', phoneHistory.length, 'panel', panel);
+  if (phoneHistory.length === 0 || panel.right > panel.width || panel.bottom > panel.height * 0.8) throw new Error('phone: history panel does not fit');
+  await g.eval(`document.getElementById('history-close').click()`);
   // The desktop tab hovers one of its own hand cards: the info appears, then goes when the mouse leaves.
   const deskCard = await h.eval(`(() => { const g = window.__landGame; const id = g.coordinator.state.players[1].hand[0]?.id; return id ? g.cardAt(id) : null; })()`);
   if (deskCard !== null) {
     await h.hover(deskCard.x, deskCard.y);
-    await sleep(600);
-    const hoverInfo = await h.eval('window.__landGame.cardInfo()');
+    let hoverInfo = null;
+    for (let k = 0; k < 40 && hoverInfo === null; k++) {
+      await sleep(50);
+      hoverInfo = await h.eval('window.__landGame.cardInfo()');
+    }
     await h.shot('desk-hover-info.png');
     await h.hover(5, 400);
     await sleep(200);

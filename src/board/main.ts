@@ -16,6 +16,7 @@ import { counterChain } from './chain.ts';
 import type { ChainStep } from './chain.ts';
 import { cuesBetween } from './effects.ts';
 import { CARD_INFO, infoPlacement } from './cardinfo.ts';
+import { matchHistory } from './history.ts';
 import { dragMessage, hoverMessage, hoveredCard, peerCursor, peerDrag } from './presence.ts';
 import type { Presence } from './presence.ts';
 import { other } from '../engine/types.ts';
@@ -203,6 +204,47 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
     }
   });
 
+  // History: the match so far in words, rebuilt from the log while the panel is open.
+  const historyPanel = $('history');
+  const historyToggle = $('history-toggle');
+  const setHistoryOpen = (open: boolean): void => {
+    historyPanel.hidden = !open;
+    historyToggle.setAttribute('aria-expanded', String(open));
+    if (open) renderHistory(true);
+  };
+  historyToggle.onclick = () => setHistoryOpen(historyPanel.hidden);
+  $('history-close').onclick = () => setHistoryOpen(false);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !historyPanel.hidden) setHistoryOpen(false);
+  });
+  function renderHistory(toEnd = false): void {
+    if (historyPanel.hidden) return;
+    const list = $('history-list');
+    // Follow new lines only if the reader is already at the end, not scrolled back.
+    const atEnd = toEnd || historyPanel.scrollTop + historyPanel.clientHeight >= historyPanel.scrollHeight - 8;
+    const turns = matchHistory(coordinator.log, coordinator.seat, (id) => coordinator.privateHand.get(id) ?? null);
+    list.replaceChildren(
+      ...turns.map((turn) => {
+        const item = document.createElement('li');
+        const heading = document.createElement('h3');
+        heading.textContent = `Turn ${turn.turn} · ${turn.seat === coordinator.seat ? 'yours' : 'theirs'}`;
+        const lines = document.createElement('ul');
+        lines.append(
+          ...turn.lines.map((line) => {
+            const row = document.createElement('li');
+            row.textContent = line.text;
+            row.className = line.seat === null ? 'outcome' : line.seat === coordinator.seat ? 'you' : 'them';
+            return row;
+          }),
+        );
+        item.append(heading, lines);
+        return item;
+      }),
+    );
+    if (turns.length === 0) list.replaceChildren(Object.assign(document.createElement('li'), { className: 'empty', textContent: 'Nothing has happened yet.' }));
+    if (atEnd) historyPanel.scrollTop = historyPanel.scrollHeight;
+  }
+
   // Card info: what a face-up land does, beside it.
   table.onInspect((info) => {
     const panel = $('card-info');
@@ -268,6 +310,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
     });
     const chain = counterChain(state, steps);
     table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights, chain }, cues);
+    renderHistory();
 
     status.textContent = (connection === 'open' || coordinator.status === 'over' ? statusText(prompt) : connectionText()) + (error ? ` (${error})` : '');
     const addButton = (label: string, onClick: () => void, quiet = false): void => {
@@ -398,6 +441,11 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
       playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
       peerPresence: () => table.peerPresence(),
       settling: () => table.settling(),
+      /** The history panel's lines (opening it if needed). */
+      history: () => {
+        if (historyPanel.hidden) setHistoryOpen(true);
+        return [...$('history-list').querySelectorAll('ul > li')].map((li) => li.textContent ?? '');
+      },
       /** The card info panel's text, or null while it is hidden. */
       cardInfo: () => ($('card-info').hidden ? null : $('card-info').textContent),
       /** Simulate the network dropping (this end closes; the peer sees its channels close). */
