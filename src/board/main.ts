@@ -6,11 +6,12 @@ import { MatchCoordinator } from '../match/coordinator.ts';
 import type { Snapshot } from '../match/coordinator.ts';
 import type { Message } from '../match/protocol.ts';
 import { DEFAULT_PRIME } from '../match/sra.ts';
-import type { Action, CardId, Seat } from '../engine/types.ts';
+import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
 import type { PeerTransport } from '../transport/types.ts';
 import { promptFor } from './controls.ts';
+import { cuesBetween } from './effects.ts';
 import type { Prompt } from './controls.ts';
 import { Table } from './table.ts';
 import type { Highlight } from './table.ts';
@@ -124,6 +125,8 @@ function play(link: Link, snapshotKey: string | null): void {
   const table = new Table();
   let picked: CardId | null = null;
   let error = '';
+  let shown: GameState | null = null; // the last state drawn, to derive effect cues
+  let lastCues: string[] = []; // for the dev automation hook
 
   const submit = (action: Action): void => {
     picked = null;
@@ -184,7 +187,10 @@ function play(link: Link, snapshotKey: string | null): void {
       for (const id of prompt.targets.keys()) highlights.set(id, 'target');
     }
     if (prompt?.kind === 'resolve') for (const id of prompt.targets.keys()) highlights.set(id, 'target');
-    table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights });
+    const cues = shown === null || shown === state ? [] : cuesBetween(shown, state);
+    shown = state;
+    if (cues.length > 0) lastCues = cues.map((c) => c.kind);
+    table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights }, cues);
 
     status.textContent = statusText(prompt) + (error ? ` (${error})` : '');
     const addButton = (label: string, onClick: () => void, quiet = false): void => {
@@ -232,8 +238,9 @@ function play(link: Link, snapshotKey: string | null): void {
           return at === null ? [] : [{ id, x: canvas.left + at.x, y: canvas.top + at.y }];
         });
         const buttons = [...$('buttons').querySelectorAll('button')].map((b) => b.textContent ?? '');
-        return { kind: prompt?.kind ?? null, cards, buttons };
+        return { kind: prompt?.kind ?? null, cards, buttons, cues: lastCues };
       },
+      playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
     };
   }
 }

@@ -7,6 +7,9 @@ import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { CardId, CardSlot, GameState, Land, Seat } from '../engine/types.ts';
 import { other } from '../engine/types.ts';
 import { landName } from './controls.ts';
+import type { Cue } from './effects.ts';
+import { playCues } from './fx.ts';
+import type { FxHost } from './fx.ts';
 
 export type Highlight = 'none' | 'playable' | 'target' | 'picked';
 
@@ -43,6 +46,8 @@ interface Place {
 class CardSprite extends Container {
   readonly id: CardId;
   target: Place | null = null;
+  /** performance.now() until which an effect keeps this card where it is. */
+  holdUntil = 0;
   private drawn = '';
   private readonly body = new Graphics();
   private readonly caption = new Text({ text: '', style: { fontFamily: 'Georgia, serif', fontSize: 13, fontWeight: 'bold', fill: 0xffffff } });
@@ -91,6 +96,11 @@ export class Table {
   private readonly cards = new Map<CardId, CardSprite>();
   private readonly layer = new Container();
   private readonly labels = new Container();
+  private readonly fxLayer = new Container();
+  private readonly world = new Container(); // everything that shakes
+  private readonly animations = new Set<{ start: number; frame: (elapsedMS: number) => boolean }>();
+  private shake = { until: 0, amplitude: 0, duration: 1 };
+  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private view: TableView | null = null;
   private mounted = false;
   private onCard: (id: CardId) => void = () => {};
@@ -100,7 +110,8 @@ export class Table {
     host.appendChild(this.app.canvas);
     this.mounted = true;
     this.layer.sortableChildren = true;
-    this.app.stage.addChild(this.labels, this.layer);
+    this.world.addChild(this.labels, this.layer, this.fxLayer);
+    this.app.stage.addChild(this.world);
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
     this.app.renderer.on('resize', () => this.layout());
     this.layout();
@@ -110,9 +121,45 @@ export class Table {
     this.onCard = handler;
   }
 
-  show(view: TableView): void {
+  /** Draw `view`, then play the effects for whatever changed to get here. */
+  show(view: TableView, cues: readonly Cue[] = []): void {
     this.view = view;
     this.layout();
+    if (this.mounted && cues.length > 0 && !this.reducedMotion.matches) {
+      playCues(this.fxHost(), cues, view.seat, view.state.pending?.card ?? null);
+    }
+  }
+
+  /** Play cues against the current view without a state change (dev tooling). */
+  playEffects(cues: readonly Cue[]): void {
+    const view = this.view;
+    if (this.mounted && view !== null) playCues(this.fxHost(), cues, view.seat, view.state.pending?.card ?? null);
+  }
+
+  private fxHost(): FxHost {
+    return {
+      layer: this.fxLayer,
+      screen: this.app.screen,
+      position: (id) => {
+        const sprite = this.cards.get(id);
+        return sprite === undefined ? null : { x: sprite.x, y: sprite.y };
+      },
+      destination: (id) => this.cardPosition(id),
+      hold: (id, ms) => {
+        const sprite = this.cards.get(id);
+        if (sprite !== undefined) sprite.holdUntil = performance.now() + ms;
+      },
+      bump: (id, factor) => {
+        const sprite = this.cards.get(id);
+        if (sprite !== undefined) sprite.scale.set(sprite.scale.x * factor);
+      },
+      shake: (ms, amplitude) => {
+        this.shake = { until: performance.now() + ms, amplitude, duration: ms };
+      },
+      animate: (frame) => {
+        this.animations.add({ start: performance.now(), frame });
+      },
+    };
   }
 
   /** Where a card is heading, in canvas CSS pixels; null if it is not on the table. */
@@ -211,12 +258,23 @@ export class Table {
     this.labels.addChild(label);
   }
 
-  /** Ease every card toward its target; frame-rate independent. */
+  /** Ease every card toward its target, run effects, shake; frame-rate independent. */
   private step(deltaMS: number): void {
+    const now = performance.now();
     const t = 1 - Math.pow(0.001, deltaMS / 350); // ~350 ms to settle
+    for (const animation of this.animations) {
+      if (!animation.frame(now - animation.start)) this.animations.delete(animation);
+    }
+    const shaking = this.shake.until - now;
+    if (shaking > 0) {
+      const strength = this.shake.amplitude * (shaking / this.shake.duration);
+      this.world.position.set((Math.random() - 0.5) * 2 * strength, (Math.random() - 0.5) * 2 * strength);
+    } else {
+      this.world.position.set(0, 0);
+    }
     for (const sprite of this.cards.values()) {
       const place = sprite.target;
-      if (place === null) continue;
+      if (place === null || sprite.holdUntil > now) continue;
       const lift = place.highlight === 'picked' ? -14 : 0;
       sprite.x += (place.x - sprite.x) * t;
       sprite.y += (place.y + lift - sprite.y) * t;
