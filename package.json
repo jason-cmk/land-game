@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.board.json",
     "test": "node --test 'test/**/*.spec.ts'",
-    "demo": "node demo/demo.ts"
+    "demo": "node demo/demo.ts",
+    "smoke": "node scripts/smoke-browser.mjs"
   },
   "engines": {
     "node": ">=24.0.0"
