@@ -6,7 +6,7 @@ Anything in here can change. Anything that contradicts the spec is a bug in this
 
 ## Constraints that shape everything
 
-1. **No server.** Static assets only. Every hosted-service-shaped solution is out.
+1. **No trusted server.** The game is static assets; nothing we run or rely on has authority over a match. Players may find each other through untrusted public relays (Trystero), which only carry the two connection messages; everything that decides a match is verified by both peers.
 2. **Symmetric peer-to-peer lockstep.** Both browsers run the exact same deterministic engine over the same shared state. Neither peer is a trusted authority.
 3. **Mental Poker for hidden information.** Decks are shuffled and locked together using commutative encryption (SRA). Unrevealed cards live inside the shared engine state as locked slots (`land: null`) until the rules call for them to be unlocked.
 4. **Strict layer separation.** The engine knows nothing about the board or cryptography; the board knows no rules; the transport knows no game.
