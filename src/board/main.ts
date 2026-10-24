@@ -22,7 +22,7 @@ import { counterChain } from './chain.ts';
 import type { ChainStep } from './chain.ts';
 import { cuesBetween } from './effects.ts';
 import { CARD_INFO, infoPlacement } from './cardinfo.ts';
-import { richText, setRichText } from './mana.ts';
+import { manaIcon, richText, setRichText } from './mana.ts';
 import { matchHistory } from './history.ts';
 import { dragMessage, hoverMessage, hoveredCard, peerCursor, peerDrag } from './presence.ts';
 import type { Presence } from './presence.ts';
@@ -66,6 +66,22 @@ function saveSnapshot(key: string, snapshot: Snapshot | null): void {
 
 function setLobbyMessage(text: string): void {
   $('lobby-message').textContent = text;
+}
+
+// How to play: each land's played effect as its card info words it (the Island's
+// counter has its own paragraph), and the section open on a first visit only.
+for (const land of ['forest', 'island', 'mountain', 'plains', 'swamp'] as const) {
+  const item = document.createElement('li');
+  const name = document.createElement('b');
+  name.textContent = `${CARD_INFO[land].name}: `;
+  item.append(manaIcon(land), ' ', name, ...richText(CARD_INFO[land].lines[0]!.replace(/^When played: /, '')));
+  $('rules-lands').append(item);
+}
+try {
+  if (localStorage.getItem('land-game:rules-seen') === null) ($('rules') as HTMLDetailsElement).open = true;
+  localStorage.setItem('land-game:rules-seen', '1');
+} catch {
+  // storage unavailable: the rules simply start folded
 }
 
 $('tabs-form').addEventListener('submit', (event) => {

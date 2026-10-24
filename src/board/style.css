@@ -412,6 +412,30 @@ button {
   }
 }
 
+/* How to play: a folding section at the top of the lobby. */
+#rules summary {
+  cursor: pointer;
+}
+
+#rules summary h2 {
+  display: inline;
+  margin: 0;
+}
+
+#rules p,
+#rules ul {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+#rules ul {
+  padding-left: 20px;
+}
+
+#rules li {
+  margin: 4px 0;
+}
+
 /* Online lobby: room codes first, the copy-paste codes folded away below. */
 .join-room {
   display: inline-flex;

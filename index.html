@@ -9,6 +9,23 @@
     <main id="lobby">
       <h1>Land Game</h1>
 
+      <section>
+        <details id="rules">
+          <summary><h2>How to play</h2></summary>
+          <p>A two-player game with only the five basic lands. Each deck has 10 of each, shuffled, and each player starts with 5 cards.</p>
+          <p><b>To win</b>, be the first with either of these on your side of the table:</p>
+          <ul>
+            <li><b>Domain:</b> one of each of the five lands.</li>
+            <li><b>Mono:</b> five of the same land.</li>
+          </ul>
+          <p><b>On your turn</b>, draw a card (the first player skips their first draw), then play one land or pass. There is no hand limit.</p>
+          <p><b>Every land does something</b> when played:</p>
+          <ul id="rules-lands"></ul>
+          <p><b>Countering:</b> when your opponent plays a land, you may discard an Island and any one other land to counter it. The land goes to their graveyard and does nothing. They can counter your counter the same way, and so on: an odd number of counters stops the land, an even number lets it through.</p>
+          <p>You win the moment your winning land enters play, before its effect. A countered land never enters, so it doesn't count. If you have to draw from an empty deck, you lose.</p>
+        </details>
+      </section>
+
       <section id="resume" hidden>
         <h2>Your online match is still going</h2>
         <p class="hint" id="resume-caption"></p>
