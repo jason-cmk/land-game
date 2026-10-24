@@ -1,6 +1,6 @@
 # Progress
 
-Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-25 (Plains draws a card, land symbols in text, battlefield piles, graveyard fan, counter popup).
+Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-25 (full-art land faces, HTTPS dev mode, How to play in the lobby).
 
 ## Picking up on another machine
 
@@ -28,6 +28,7 @@ Working notes:
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
 - **Rooms in dev:** `?courier=local` makes room codes meet over `BroadcastChannel` between tabs of one browser, `?courier=off` turns them off; without either, dev uses the real public Nostr relays.
 - **Smoke test on a slow machine:** the emulated phone tab is slow (seconds per touch event on the 4-core server), so the board decides tap versus long press from event timestamps, and the smoke test saves `<tag>-stuck-<tab>.png` and says what it tried when a move goes nowhere. Two runs in a row passing is a fair bar before merging.
+- **Dev server in a worktree does not reload:** `vite.config.ts` ignores `.claude/`, so a dev server started inside `.claude/worktrees/<name>` serves stale code after edits; restart it.
 - **Next:** not decided; candidates are under Next step.
 
 ## Summary
@@ -63,6 +64,9 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Board: online by room code (Trystero), matching code, automatic reconnect | `src/board/rooms.ts`, `courier.ts`, `relink.ts` | Done |
 | Rules: Plains draws a card (was Cloudshift) | `src/engine/`, `src/bot/policy.ts`, `spec.md` | Done |
 | Board: land symbols in text, battlefield piles, graveyard fan, counter popup | `src/board/mana.ts`, `table.ts`, `main.ts`, `style.css` | Done |
+| Board: full-art land faces | `src/board/art.ts` | Done |
+| Board: How to play in the lobby | `index.html`, `src/board/main.ts` | Done |
+| Tooling: HTTPS dev mode for room codes off localhost | `vite.config.ts` | Done |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -92,6 +96,9 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Online by room code**: *Create a room* shows a four-character code; the other player types it and the match starts. Trystero (`trystero/nostr`, over public Nostr relays) only carries the usual invite and reply codes; the match runs over our own WebRTC link as before. Both screens show a matching code (four symbols from the link's DTLS fingerprints) so players can see nothing sits between them. A dropped or reloaded match reconnects on its own through a room named by the match id, with the code swap folded underneath as a fallback. `tech.md` principle 1 is now "no trusted server". Unit-tested with an in-memory courier and the fake WebRTC (fresh and reconnect rooms, joiner first, a full room, a partner who leaves early, cancelling, matching codes). `npm run smoke` meets by room code over a same-browser courier, checks both matching codes agree, and reconnects with no clicks after a drop and after a reload. Checked live twice in headless Chromium over the real relays: linked in 10 to 11 s, same matching code on both tabs, no console errors.
 - **Plains draws a card**: Plains is no longer Cloudshift (reuse another land's effect); played and resolved, it draws a card, like an Island played for its draw. The engine drops `reuseLand` and Plains's declared target; the draw purpose `islandDraw` is now `effectDraw`; the Swamp is the only effect that picks a target at resolution. The bot values a Plains like an Island's draw; the Plains halo effect and the history's "(as Forest)" are gone. `spec.md` records the old rule under historical variants.
 - **Land symbols, piles, graveyard fan, counter popup**: descriptions (card info, prompts, buttons, history, the popup) name lands by mana symbol: the pure text carries `{forest}` tokens and `mana.ts` draws each as an inline SVG of the card's symbol, keeping the name as hidden text; only card titles spell names out (unit-tested: no effect line names a land in words). Battlefields group lands into diagonal piles by type, at most four deep with a count badge beyond. While a Forest picks its target, the graveyard fans out in the middle; a hovered card pulls out and the last one stays out 3 s, on touch too (the same for a Swamp-revealed hand). A counter decision is a popup in the middle of the table showing the land being played. Cards under a panel over the table (the popup, the history) no longer count as hovered. Smoke test: it clicks choices in the popup as well as the status bar; it taps a part of each card no other card covers (`visiblePoint`; with Plains drawing, phone hands grow to nine overlapping cards and a tap on a card's middle hit its neighbour); the online phase plays 15 moves before its drop and reload checks, since matches are now shorter; and a move that goes nowhere saves a screenshot and says what was tried.
+- **Full-art land faces**: each face is now one tall scene after John Avon's Unhinged basics (an island from the air, red peaks, a misty swamp, a green-lit forest, a sunset plain), still flat shapes drawn in code, inside a land-coloured rule and a flecked brown frame, with the name bar over the art and a small mana symbol bottom right.
+- **HTTPS dev mode**: room codes need `crypto.subtle` (Trystero encrypts with it), which browsers give only `https://` pages and `localhost`, so on `http://<LAN or public IP>` rooms failed silently. `npm run dev:https` serves with a self-signed certificate (`@vitejs/plugin-basic-ssl`, on only when `HTTPS` is set); the lobby now says so on an insecure page instead of failing.
+- **How to play**: a folding section at the top of the lobby, open on a first visit only (`localStorage`), with each land's effect taken from the card info wording.
 - **Tests**: 143 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Online reconnect**: reconnect codes carry the match id (hash of log entry 0) and the inviter's seat, so either player can make one and mismatched codes are refused with a clear message. A dropped link opens a code-swap panel over the table and pauses play; a reloaded tab resumes from the lobby (`sessionStorage` snapshot) or can abandon the match. Tested at the transport level (a match survives its link dying, either seat inviting) and in `npm run smoke` over real WebRTC: a forced drop, then a reload, each followed by more moves in lockstep.
@@ -121,5 +128,5 @@ Not decided. Candidates: merging or dropping `matching-corner` (see the top), pl
 - The lobby's copy-paste codes are long; pasting them on a phone works in emulation, but sharing them from a phone (e.g. via a chat app) is untested.
 - Room codes depend on public Nostr relays run by strangers: they can be slow (10 to 11 s to link in testing), go away, or drop Trystero's traffic. The copy-paste codes stay as the fallback. Which Trystero strategy (Nostr, MQTT, BitTorrent trackers), or several at once, is still open.
 - A relay operator who knew a room code could sit between the players and read their hands; the four-character code is a weak password (about 920,000 codes). The matching code catches this only if players compare it. Reconnect rooms use the match id, so they are not exposed this way.
-- Room codes have not been tried on real phones or across two different networks yet.
+- Room codes work in Chrome and Brave but reportedly not in Firefox (2026-10-25, not yet diagnosed). First tries across networks (a phone on mobile data) in progress.
 - Open question (from planning): a fallback when the direct link fails although both players are in the room (strict NATs, `.local` addresses that will not resolve). Trystero's own connection would fail the same way, so the likely fix is a TURN server (it relays only DTLS-encrypted traffic, so it can stay untrusted). Wait until it fails for real.
