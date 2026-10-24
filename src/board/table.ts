@@ -62,7 +62,7 @@ class CardSprite extends Container {
   private readonly marks = new Graphics();
   private readonly textures: CardTextures;
 
-  constructor(id: CardId, textures: CardTextures, onTap: (id: CardId) => void, onHover: (id: CardId | null) => void, onPress: (id: CardId, event: PointerEvent) => void) {
+  constructor(id: CardId, textures: CardTextures, onTap: (id: CardId) => void, onHover: (id: CardId | null, pointerType: string) => void, onPress: (id: CardId, event: PointerEvent) => void) {
     super();
     this.id = id;
     this.textures = textures;
@@ -74,8 +74,8 @@ class CardSprite extends Container {
     this.cursor = 'pointer';
     this.on('pointertap', () => onTap(this.id));
     this.on('pointerdown', (event) => onPress(this.id, event.nativeEvent as PointerEvent));
-    this.on('pointerover', () => onHover(this.id));
-    this.on('pointerout', () => onHover(null));
+    this.on('pointerover', (event) => onHover(this.id, event.pointerType));
+    this.on('pointerout', (event) => onHover(null, event.pointerType));
   }
 
   /** Redraw only when what the card shows changes. */
@@ -125,10 +125,18 @@ export class Table {
   private peerHover: CardId | null = null;
   private readonly peerCursor = new Graphics().circle(0, 0, 9).fill({ color: PEER_COLOUR, alpha: 0.35 }).circle(0, 0, 4).fill({ color: PEER_COLOUR, alpha: 0.9 });
   private peerCursorSeen = 0;
-  /** A press on a draggable card; it becomes a drag once the pointer travels. */
-  private press: { id: CardId; x: number; y: number; dragging: boolean } | null = null;
+  /**
+   * A press on a draggable card; it becomes a drag once the pointer travels
+   * `threshold` pixels. A finger holds the card `lift` pixels above itself, so it stays in sight.
+   */
+  private press: { id: CardId; x: number; y: number; dragging: boolean; threshold: number; lift: number } | null = null;
   /** Set when the current press turned into a drag, so its tap is ignored. */
   private pressDragged = false;
+  /** Set when the current press was a long press that showed card info, so its tap is ignored. */
+  private longPressed = false;
+  private inspectTimer: ReturnType<typeof setTimeout> | undefined;
+  private inspecting: CardId | null = null;
+  private onInspectCard: (info: { land: Land; box: { x: number; y: number; width: number; height: number } } | null) => void = () => {};
   private localDrag: { id: CardId; x: number; y: number } | null = null;
   private peerDrag: { id: CardId; x: number; y: number; seen: number } | null = null;
   private onDragStartCard: (id: CardId) => void = () => {};
@@ -144,6 +152,8 @@ export class Table {
     this.world.addChild(this.labels, this.layer, this.fxLayer);
     this.peerCursor.visible = false;
     this.app.stage.addChild(this.world, this.peerCursor);
+    // A long press shows card info; the browser must not open its own menu or callout over it.
+    this.app.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     // Track the pointer on the canvas element itself, leaving Pixi's event tree to the cards.
     this.app.canvas.addEventListener('pointermove', (event) => {
       const box = this.app.canvas.getBoundingClientRect();
@@ -151,6 +161,8 @@ export class Table {
     });
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
     this.app.renderer.on('resize', () => this.layout());
+    // resizeTo only follows the window; the host also changes size when the status bar wraps (phones).
+    new ResizeObserver(() => this.app.queueResize()).observe(host);
     this.layout();
   }
 
@@ -167,6 +179,14 @@ export class Table {
 
   onCardClick(handler: (id: CardId) => void): void {
     this.onCard = handler;
+  }
+
+  /**
+   * Show (with the land and the card's box in canvas CSS pixels) or hide (null)
+   * what a face-up card does: after a short mouse hover, or while a finger long-presses it.
+   */
+  onInspect(handler: (info: { land: Land; box: { x: number; y: number; width: number; height: number } } | null) => void): void {
+    this.onInspectCard = handler;
   }
 
   /** The local pointer entering (id) or leaving (null) a card. */
@@ -241,6 +261,7 @@ export class Table {
   /** Draw `view`, then play the effects for whatever changed to get here. */
   show(view: TableView, cues: readonly Cue[] = []): void {
     this.view = view;
+    this.stopInspect(); // cards may move or turn over
     this.layout();
     if (this.mounted && cues.length > 0 && !this.reducedMotion.matches) {
       playCues(this.fxHost(), cues, view.seat, view.state.pending?.card ?? null);
@@ -308,9 +329,12 @@ export class Table {
     if (view === null || !this.mounted) return; // mount() lays out the latest view once ready
     const width = this.app.screen.width;
     const height = this.app.screen.height;
-    const scale = Math.max(0.5, Math.min(width / 1100, height / 860, 1.25));
-    const cardW = BASE_W * scale;
     const rowH = height / 5;
+    // Narrow screens (phones held upright): cards sized by row height, hands overlapping
+    // across the full width, and slim side columns for the deck and graveyard.
+    const compact = width < 720;
+    const scale = compact ? Math.max(0.5, Math.min((rowH * 0.8) / BASE_H, width / (BASE_W * 5.2), 1.1)) : Math.max(0.5, Math.min(width / 1100, height / 860, 1.25));
+    const cardW = BASE_W * scale;
     const me = view.seat;
     const them = other(me);
     const pendingCard = view.state.pending?.card ?? null;
@@ -331,8 +355,8 @@ export class Table {
     };
 
     const onStack = new Set(view.chain.flatMap((link) => link.cards));
-    const margin = 24 * scale;
-    const sideW = cardW * 2.2;
+    const margin = (compact ? 6 : 24) * scale;
+    const sideW = cardW * (compact ? 1.2 : 2.2);
     for (const seat of [them, me]) {
       const p = view.state.players[seat];
       const mine = seat === me;
@@ -343,8 +367,9 @@ export class Table {
       this.handOrders[seat] = nextHandOrder(this.handOrders[seat], inHand.map((s) => s.id));
       const hand = this.handOrders[seat].map((id) => inHand.find((s) => s.id === id)!);
       const handFace = (s: CardSlot): Land | null => s.land ?? (mine ? (view.privateHand.get(s.id) ?? null) : null);
-      row(hand, handY, sideW, width - sideW, handFace, (s) => s.land !== null);
-      row(p.battlefield, fieldY, sideW, width - sideW, (s) => s.land, () => false);
+      // Compact rows only keep clear of their own side column: the deck beside the hand, the graveyard beside the field.
+      row(hand, handY, compact ? margin : sideW, width - sideW, handFace, (s) => s.land !== null);
+      row(p.battlefield, fieldY, sideW, compact ? width - margin : width - sideW, (s) => s.land, () => false);
       // Graveyard on the left of the field row, small and fanned; library on the right as a pile.
       // Cards paying for a counter sit in the middle until the chain ends, not in the graveyard yet.
       const graveyard = p.graveyard.filter((s) => !onStack.has(s.id));
@@ -381,10 +406,13 @@ export class Table {
           id,
           this.textures!,
           (cid) => {
-            if (!this.pressDragged) this.onCard(cid);
+            if (!this.pressDragged && !this.longPressed) this.onCard(cid);
           },
-          (cid) => this.onHoverCard(cid),
-          (cid, event) => this.startPress(cid, event),
+          (cid, pointerType) => {
+            this.onHoverCard(cid);
+            if (pointerType === 'mouse') this.hoverInspect(cid);
+          },
+          (cid, event) => this.pointerDown(cid, event),
         );
         sprite.position.set(place.x, place.y);
         sprite.scale.set(place.scale);
@@ -403,22 +431,86 @@ export class Table {
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   }
 
+  private pointerDown(id: CardId, event: PointerEvent): void {
+    this.pressDragged = false;
+    this.longPressed = false;
+    this.stopInspect();
+    if (event.pointerType !== 'mouse') this.startLongPress(id, event);
+    this.startPress(id, event);
+  }
+
+  /** Card info for the card under the mouse, after it rests there a moment (null stops). */
+  private hoverInspect(id: CardId | null): void {
+    this.stopInspect();
+    if (id !== null && this.press === null) this.inspectTimer = setTimeout(() => this.inspect(id), 300);
+  }
+
+  /** A finger held still on a face-up card shows its info until it lifts or starts a drag. */
+  private startLongPress(id: CardId, event: PointerEvent): void {
+    const start = this.local(event);
+    const done = (): void => {
+      clearTimeout(timer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    const move = (e: PointerEvent): void => {
+      const at = this.local(e);
+      if (!this.longPressed && Math.hypot(at.x - start.x, at.y - start.y) > 10) done();
+    };
+    const up = (): void => {
+      done();
+      this.stopInspect();
+    };
+    const timer = setTimeout(() => {
+      if (this.press?.dragging || !this.inspect(id)) return;
+      this.longPressed = true;
+      navigator.vibrate?.(10);
+    }, 450);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
+  /** Report a face-up card's info; false if the card shows its back. */
+  private inspect(id: CardId): boolean {
+    const place = this.cards.get(id)?.target;
+    if (place == null || place.face === null) return false;
+    const at = this.rest(place);
+    const width = BASE_W * place.scale;
+    const height = BASE_H * place.scale;
+    this.inspecting = id;
+    this.onInspectCard({ land: place.face, box: { x: at.x - width / 2, y: at.y - height / 2, width, height } });
+    return true;
+  }
+
+  private stopInspect(): void {
+    clearTimeout(this.inspectTimer);
+    if (this.inspecting === null) return;
+    this.inspecting = null;
+    this.onInspectCard(null);
+  }
+
   /** Playable and picked cards can be dragged; the rest only tapped. */
   private startPress(id: CardId, event: PointerEvent): void {
-    this.pressDragged = false;
     const highlight = this.view?.highlights.get(id);
-    if (this.press !== null || (highlight !== 'playable' && highlight !== 'picked')) return;
-    this.press = { id, ...this.local(event), dragging: false };
+    const place = this.cards.get(id)?.target;
+    if (this.press !== null || place == null || (highlight !== 'playable' && highlight !== 'picked')) return;
+    // A finger wobbles more than a mouse, and would hide the card it drags.
+    const touch = event.pointerType !== 'mouse';
+    this.press = { id, ...this.local(event), dragging: false, threshold: touch ? 12 : 6, lift: touch ? -BASE_H * place.scale * 0.6 : 0 };
     const move = (e: PointerEvent): void => {
       const press = this.press;
       if (press === null) return;
-      const at = this.local(e);
+      const pointer = this.local(e);
       if (!press.dragging) {
-        if (Math.hypot(at.x - press.x, at.y - press.y) < 6) return;
+        if (Math.hypot(pointer.x - press.x, pointer.y - press.y) < press.threshold) return;
         press.dragging = true;
         this.pressDragged = true;
+        this.stopInspect();
         this.onDragStartCard(press.id);
       }
+      const at = { x: pointer.x, y: pointer.y + press.lift };
       this.localDrag = { id: press.id, ...at };
       this.onDragMoveCard(press.id, at.x / this.app.screen.width, at.y / this.app.screen.height);
     };
@@ -430,7 +522,9 @@ export class Table {
       this.press = null;
       this.localDrag = null;
       if (press === null || !press.dragging) return;
-      const at = this.local(e);
+      // The drop lands where the card is drawn, which for a finger is above it.
+      const pointer = this.local(e);
+      const at = { x: pointer.x, y: pointer.y + press.lift };
       const dropped = e.type === 'pointerup';
       // The hand row is the bottom fifth; dropping back there puts the card back.
       const onTable = dropped && at.y < (this.app.screen.height / 5) * 4;
@@ -467,7 +561,7 @@ export class Table {
     const gap = 24 * scale;
     const slots = Math.ceil(view.chain.length / 2);
     const room = centre - cardW * 0.6 - gap - 24 * scale; // from the play's edge to the screen edge
-    const step = slots <= 1 ? 0 : Math.min(pairW + gap, (room - pairW) / (slots - 1));
+    const step = slots <= 1 ? 0 : Math.max(0, Math.min(pairW + gap, (room - pairW) / (slots - 1)));
     view.chain.forEach((link, i) => {
       const side = i % 2 === 0 ? 1 : -1;
       const x = centre + side * (cardW * 0.6 + gap + pairW / 2 + Math.floor(i / 2) * step);

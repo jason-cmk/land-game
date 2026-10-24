@@ -4,6 +4,8 @@
 //   2. a tab reloaded mid-game resumes in lockstep
 //   3. two tabs connect over real WebRTC with the copy-paste codes and play, then
 //      reconnect with fresh codes after a dropped link and after a reload
+//   4. a phone-sized touch tab against a desktop tab: taps, touch drags, and the
+//      card info shown by a long press (touch) and a hover (mouse)
 // Fails on any timeout, lockstep mismatch or console error. Screenshots go to
 // smoke-output/.
 //
@@ -66,30 +68,68 @@ try {
       ws.send(JSON.stringify({ id, method, params, sessionId }));
     });
 
-  async function openTab(name) {
+  const DESKTOP = { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false };
+  const PHONE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true };
+
+  async function openTab(name, device = DESKTOP) {
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     await send('Runtime.enable', {}, sessionId);
     await send('Page.enable', {}, sessionId);
-    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false }, sessionId);
+    await send('Emulation.setDeviceMetricsOverride', device, sessionId);
+    if (device.mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, sessionId);
     await send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId);
     await send('Page.navigate', { url: PAGE }, sessionId);
     const tab = {
       name,
+      touch: device.mobile,
       async eval(expression) {
         const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId);
         if (r.exceptionDetails) throw new Error(`${name}: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
         return r.result.value;
       },
+      async front() {
+        await send('Page.bringToFront', {}, sessionId);
+      },
+      /** A click, or a tap on a touch tab. */
       async click(x, y) {
         await send('Page.bringToFront', {}, sessionId);
+        if (tab.touch) {
+          await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }, sessionId);
+          await sleep(40);
+          await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }, sessionId);
+          return;
+        }
         for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
           await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }, sessionId);
         }
       },
-      /** Press at `from`, move in steps to `to`, release; `midway` runs while the card is held. */
+      /** Hold a finger still at (x, y) for `ms`, running `during` before it lifts. */
+      async longPress(x, y, ms, during) {
+        await send('Page.bringToFront', {}, sessionId);
+        await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }, sessionId);
+        await sleep(ms);
+        await during();
+        await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }, sessionId);
+      },
+      async hover(x, y) {
+        await send('Page.bringToFront', {}, sessionId);
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sessionId);
+      },
+      /** Press at `from`, move in steps to `to`, release; `midway` runs while the card is held. Touch tabs drag a finger. */
       async drag(from, to, midway) {
         await send('Page.bringToFront', {}, sessionId);
+        if (tab.touch) {
+          const at = (k, steps) => [{ x: from.x + ((to.x - from.x) * k) / steps, y: from.y + ((to.y - from.y) * k) / steps }];
+          await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0, 1) }, sessionId);
+          for (let k = 1; k <= 12; k++) {
+            await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(k, 12) }, sessionId);
+            await sleep(25);
+            if (k === 6 && midway) await midway();
+          }
+          await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }, sessionId);
+          return;
+        }
         await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y }, sessionId);
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', buttons: 1, clickCount: 1 }, sessionId);
         const steps = 12;
@@ -150,13 +190,18 @@ try {
       const useCard = s.cards.length > 0 && (buttons.length === 0 || rand() < 0.8);
       const before = s.log;
       if (useCard) {
-        const card = s.cards[Math.floor(rand() * s.cards.length)];
+        const pick = Math.floor(rand() * s.cards.length);
         // Clicks hit cards where they are drawn: wait until nothing is still gliding (a freshly
         // shuffled-in card's neighbours slide across it) or held by an effect.
+        // Bring the tab forward first: headless Chrome throttles animation frames in background tabs.
+        await tab.front();
         for (let waited = 0; (await tab.eval('window.__landGame.settling()')) > 1; waited += 50) {
-          if (waited > 4000) throw new Error(`${tag}: the table never settled`);
+          if (waited > 4000) throw new Error(`${tag}: the table never settled (${await tab.eval('window.__landGame.settling()')} px)`);
           await sleep(50);
         }
+        // Positions read before settling can be stale: a phone's status bar re-wrapping resizes the table.
+        const fresh = await tab.eval('window.__landGame.clickables().cards');
+        const card = fresh.find((c) => c.id === s.cards[pick].id) ?? s.cards[pick];
         if (s.kind === 'main' && rand() < 0.5) {
           // Drag it onto the middle of the table; the other tab should see it move.
           const middle = await tab.eval(`(() => { const r = document.getElementById('table').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -299,6 +344,54 @@ try {
   await playByClicking([e, f], 8, 'online-resumed');
   const afterResume = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'reload: heads converge');
   log('reload: log', resumed[1].log, '->', afterResume[1].log, 'heads equal', afterResume[0].head === afterResume[1].head);
+
+  // --- A phone (touch) against a desktop tab ------------------------------------------
+  log('== phone (touch) vs desktop');
+  const g = await openTab('phone', PHONE);
+  const h = await openTab('desk');
+  await g.eval(`document.getElementById('room').value = 'phone'; document.querySelector('button[value="0"]').click()`);
+  await sleep(300);
+  await h.eval(`document.getElementById('room').value = 'phone'; document.querySelector('button[value="1"]').click()`);
+  await waitFor([g, h], (s) => s.every((x) => x?.status === 'playing'), 15000, 'phone: both playing');
+  await g.shot('phone-start.png');
+  // A long press on one of the phone's own hand cards shows what it does, and plays nothing.
+  await g.front();
+  for (let waited = 0; (await g.eval('window.__landGame.settling()')) > 1; waited += 50) {
+    if (waited > 4000) throw new Error('phone: the table never settled');
+    await sleep(50);
+  }
+  const handCard = await g.eval(`(() => { const g = window.__landGame; const id = g.coordinator.state.players[0].hand[0].id; return g.cardAt(id); })()`);
+  const pressedAt = (await state(g)).log;
+  let pressInfo = null;
+  await g.longPress(handCard.x, handCard.y, 450, async () => {
+    for (let k = 0; k < 30 && pressInfo === null; k++) {
+      await sleep(50);
+      pressInfo = await g.eval('window.__landGame.cardInfo()');
+    }
+    await g.shot('phone-long-press.png');
+  });
+  await sleep(300);
+  const afterPress = await state(g);
+  log('phone: long press info', JSON.stringify(pressInfo), 'hidden after lifting', (await g.eval('window.__landGame.cardInfo()')) === null);
+  if (!pressInfo?.includes('When played:') || afterPress.log !== pressedAt || (await g.eval('window.__landGame.cardInfo()')) !== null) throw new Error('phone: long press did not show card info cleanly');
+  const phoneMoves = await playByClicking([g, h], 30, 'phone');
+  log('phone: moves', phoneMoves);
+  if (phoneMoves.cardDrags === 0 || phoneMoves.cardClicks === 0) throw new Error('phone: expected both taps and drags');
+  const phone = await waitFor([g, h], (s) => s[0].head === s[1].head, 10000, 'phone: heads converge');
+  log('phone: log', phone.map((s) => s.log), 'heads equal', phone[0].head === phone[1].head);
+  await g.shot('phone-mid.png');
+  // The desktop tab hovers one of its own hand cards: the info appears, then goes when the mouse leaves.
+  const deskCard = await h.eval(`(() => { const g = window.__landGame; const id = g.coordinator.state.players[1].hand[0]?.id; return id ? g.cardAt(id) : null; })()`);
+  if (deskCard !== null) {
+    await h.hover(deskCard.x, deskCard.y);
+    await sleep(600);
+    const hoverInfo = await h.eval('window.__landGame.cardInfo()');
+    await h.shot('desk-hover-info.png');
+    await h.hover(5, 400);
+    await sleep(200);
+    log('desk: hover info', JSON.stringify(hoverInfo));
+    if (!hoverInfo?.includes('When played:') || (await h.eval('window.__landGame.cardInfo()')) !== null) throw new Error('desk: hover did not show card info cleanly');
+  }
 
   log('== console errors/warnings:', errors.length ? `\n${errors.join('\n')}` : 'none');
   if (errors.length > 0) throw new Error(`${errors.length} console error(s)`);

@@ -1,6 +1,6 @@
 # Progress
 
-Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24.
+Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile and card info added).
 
 ## Picking up on another machine
 
@@ -14,22 +14,23 @@ Paused on 2026-10-24 with everything merged to `main` and pushed to `github.com/
    ```
 2. **Check it works.** All four should pass:
    - `npm run typecheck`
-   - `npm test`: 111 tests
+   - `npm test`: 115 tests
    - `npm run demo`
-   - `npm run smoke`: drives the board in headless Chrome (a two-tab match, a reload, then WebRTC with a forced drop and a reload). It needs Google Chrome; the default path is the macOS one, so elsewhere set `CHROME_PATH` (e.g. `/usr/bin/google-chrome`). It uses ports 5199 and 9333 and writes screenshots to `smoke-output/` (gitignored).
+   - `npm run smoke`: drives the board in headless Chrome (a two-tab match, a reload, then WebRTC with a forced drop and a reload, then a phone-sized touch tab against a desktop tab). It needs Google Chrome or Chromium; the default path is the macOS one, so elsewhere set `CHROME_PATH` (e.g. `/usr/bin/chromium` on the Arch server). It uses ports 5199 and 9333 and writes screenshots to `smoke-output/` (gitignored).
 3. **Play it.** `npm run dev`, then open http://localhost:5173 in two tabs, enter the same room in both and take seat 1 and seat 2. For online play, one player clicks *Create an invite*, the other pastes it and sends back the reply code.
 4. **Read before changing behaviour:** `AGENT.md`, then `spec.md` (source of truth), `tech.md`, `design.md`.
 
 Working notes:
 
-- **Dev hook.** In `npm run dev`, `window.__landGame` exposes the coordinator plus `clickables()`, `cardAt(id)`, `settling()`, `peerPresence()`, `playEffects(cues)` and `dropLink()`; `scripts/smoke-browser.mjs` shows how to drive the board with it over the Chrome DevTools protocol (no Playwright).
-- **Browser automation must wait for `settling()` to reach 0** before clicking: Pixi hit-tests cards where they are drawn, and new hand cards make their neighbours slide.
+- **Dev hook.** In `npm run dev`, `window.__landGame` exposes the coordinator plus `clickables()`, `cardAt(id)`, `settling()`, `cardInfo()`, `peerPresence()`, `playEffects(cues)` and `dropLink()`; `scripts/smoke-browser.mjs` shows how to drive the board with it over the Chrome DevTools protocol (no Playwright).
+- **Browser automation must wait for `settling()` to reach 0** before clicking, then re-read card positions: Pixi hit-tests cards where they are drawn, new hand cards make their neighbours slide, and on a phone a re-wrapping status bar resizes the table. Bring the tab to the front first (`Page.bringToFront`): headless Chrome throttles animation frames in background tabs, so a background table can look stuck.
+- **Touch is emulated over CDP** with `Emulation.setTouchEmulationEnabled` and `Input.dispatchTouchEvent`; see `tab.click`/`drag`/`longPress` in the smoke script.
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
-- **The next step is below**: the effect tuning and Swamp reveal moment are self-contained board work in `src/board/fx.ts` and `effects.ts`.
+- **The next step is below**: the history log (item 1 of *Not done*).
 
 ## Summary
 
-Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome: code-drawn card art, effect animations, live presence (hover, cursor, drag), drag-to-play, and a visible counter chain. A dropped or reloaded online match reconnects with fresh codes.
+Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome: code-drawn card art, effect animations, live presence (hover, cursor, drag), drag-to-play, and a visible counter chain. A dropped or reloaded online match reconnects with fresh codes. It works on phones (compact portrait layout, tap and finger drag), and hovering or long-pressing a card shows what it does.
 
 | Layer | Path | Status |
 | --- | --- | --- |
@@ -49,6 +50,9 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Board: card art (code-drawn, baked textures) | `src/board/art.ts` | First pass |
 | Board: counter-chain display | `src/board/chain.ts`, `table.ts` | Done |
 | Board: online reconnect (drop and reload) | `src/board/relink.ts`, `transport/webrtc.ts` | Done |
+| Board: phones and touch (compact layout, tap, finger drag) | `src/board/table.ts`, `style.css` | Done |
+| Board: card info on hover / long press | `src/board/cardinfo.ts`, `table.ts`, `main.ts` | Done |
+| Board: history log | | Not started |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -67,7 +71,9 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Card art**: MTG-style basic land faces (name bar, landscape, type line, mana symbol) and an abstract card back with the five land colours, drawn in code (`src/board/art.ts`) and baked into textures at mount. Revealed hand cards get a rim and an eye badge.
 - **Counter chain**: paid pairs stay beside the play, numbered and labelled by payer, with what allowing would do now; rebuilt from the log (`chain.ts`, unit-tested) so it survives reloads. Checked in headless Chrome with a two-counter chain.
 - **Coordinator fix found in the browser**: an exception in an `onChange` listener was caught by the message handler and treated as the peer failing verification, so a UI bug forfeited the match. Listener errors now go to `onListenerError` (default: rethrown on a fresh task).
-- **Tests**: 111 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
+- **Phones and touch**: below 720 px wide the table uses a compact layout (cards sized by row height, hands overlapping across the full width, slim deck and graveyard columns); the status bar keeps room for a two-line prompt. A finger drag needs 12 px of travel and holds the card above the fingertip; the drop lands where the card is drawn. The canvas now follows its container's size (`ResizeObserver`), fixing the bottom row being cut off when the status bar wrapped. Long-press callouts and menus are suppressed on the canvas. `npm run smoke` has a phone phase (390×844, touch emulation) that plays by taps and finger drags against a desktop tab.
+- **Card info**: a panel above a face-up card says what it does (spec wording; `cardinfo.ts`, unit-tested placement): after a 0.3 s mouse hover, or while a finger long-presses (0.45 s). A long press never plays the card. Checked in the smoke test on both the phone and the desktop tab.
+- **Tests**: 115 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Online reconnect**: reconnect codes carry the match id (hash of log entry 0) and the inviter's seat, so either player can make one and mismatched codes are refused with a clear message. A dropped link opens a code-swap panel over the table and pauses play; a reloaded tab resumes from the lobby (`sessionStorage` snapshot) or can abandon the match. Tested at the transport level (a match survives its link dying, either seat inviting) and in `npm run smoke` over real WebRTC: a forced drop, then a reload, each followed by more moves in lockstep.
 - **Smoke test reliability**: the rare lost click in `npm run smoke` was the test clicking while a neighbouring card was still gliding over its target (new cards shuffle into the hand). The board exposes `settling()` to dev tooling and the test waits for the whole table to come to rest.
@@ -77,10 +83,11 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 
 1. **Board polish**: effect tuning, Swamp reveal moment.
 2. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
+3. **History log**: a 📜 button in the chrome opens a panel listing the match so far in plain words (e.g. "Opponent played Mountain → destroyed your Forest", "You countered with Island"). Build it from the coordinator's hash-chained log, as `chain.ts` does for the counter chain, so it survives reloads. It must only show what this player is allowed to know: hidden draws and the opponent's unrevealed cards stay hidden. Must work on phones too.
 
 ## Next step
 
-Board polish, then layer enforcement:
+In order: the history log (item 3), then board polish, then layer enforcement:
 
 - **Effect tuning**: the counter (`fx.ts` `counter`/`countered`), Forest regrowth and Swamp discard effects are subtle next to the meteor; make them as readable.
 - **Swamp reveal moment**: when a Swamp makes a player reveal their hand, the revealed cards only flash in place. Give it a moment (e.g. fan the revealed hand toward the middle while the opponent picks the discard).
@@ -94,3 +101,6 @@ Board polish, then layer enforcement:
 - The default STUN server is Google's public one: third-party, sees connection metadata only. Still to be confirmed that this fits "no server at all".
 - Known quirk: when a hand mixes revealed and hidden cards, the opponent's view of a hovered hand card can sit one position off (see `design.md` § Presence).
 - An online match's saved state lives in `sessionStorage`: it survives a reload, not closing the tab.
+- Phones are checked only under Chrome's mobile emulation, not on a real device; iOS Safari (long-press callout, `100dvh`, vibration unsupported) in particular is untested. A phone held sideways gets small cards (about 40×56 px), limited by its height.
+- Presence on touch: a finger shows the opponent which card it touches only while it is down; there is no idle cursor.
+- The lobby's copy-paste codes are long; pasting them on a phone works in emulation, but sharing them from a phone (e.g. via a chat app) is untested.

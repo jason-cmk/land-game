@@ -29,4 +29,4 @@ Node 24+ (native TypeScript type stripping). Runtime dependency: PixiJS (board o
 - `npm run typecheck`
 - `npm test`
 - `npm run demo`
-- `npm run smoke`: headless-Chrome play-through of the board (two tabs, reload, real WebRTC); needs Chrome (`CHROME_PATH` to override)
+- `npm run smoke`: headless-Chrome play-through of the board (two tabs, reload, real WebRTC, a touch phone); needs Chrome or Chromium (`CHROME_PATH` to override)

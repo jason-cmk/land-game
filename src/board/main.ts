@@ -15,6 +15,7 @@ import { dropOutcome, promptFor } from './controls.ts';
 import { counterChain } from './chain.ts';
 import type { ChainStep } from './chain.ts';
 import { cuesBetween } from './effects.ts';
+import { CARD_INFO, infoPlacement } from './cardinfo.ts';
 import { dragMessage, hoverMessage, hoveredCard, peerCursor, peerDrag } from './presence.ts';
 import type { Presence } from './presence.ts';
 import { other } from '../engine/types.ts';
@@ -202,6 +203,20 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
     }
   });
 
+  // Card info: what a face-up land does, beside it.
+  table.onInspect((info) => {
+    const panel = $('card-info');
+    panel.hidden = info === null;
+    if (info === null) return;
+    const { name, lines } = CARD_INFO[info.land];
+    const heading = document.createElement('strong');
+    heading.textContent = name;
+    panel.replaceChildren(heading, ...lines.map((line) => Object.assign(document.createElement('p'), { textContent: line })));
+    const host = $('table');
+    const at = infoPlacement(info.box, { width: panel.offsetWidth, height: panel.offsetHeight }, { width: host.clientWidth, height: host.clientHeight });
+    panel.style.transform = `translate(${at.x}px, ${at.y}px)`;
+  });
+
   // Drag-to-play: the same outcomes as clicking, decided by where the card lands.
   let dragging: CardId | null = null;
   table.onDragStart((id) => {
@@ -383,6 +398,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
       playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
       peerPresence: () => table.peerPresence(),
       settling: () => table.settling(),
+      /** The card info panel's text, or null while it is hidden. */
+      cardInfo: () => ($('card-info').hidden ? null : $('card-info').textContent),
       /** Simulate the network dropping (this end closes; the peer sees its channels close). */
       dropLink: () => link.close(),
       cardAt: (id: CardId) => {

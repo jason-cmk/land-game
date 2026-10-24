@@ -138,6 +138,62 @@ button.quiet {
 }
 
 #table canvas {
+  position: absolute; /* out of flow, so the table's size comes from the page layout alone */
+  inset: 0;
   display: block;
   touch-action: none; /* cards drag; the page must not scroll or zoom under them */
+}
+
+#table canvas {
+  -webkit-touch-callout: none; /* a long press shows card info, not the browser's callout */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#card-info {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: min(260px, calc(100% - 16px));
+  padding: 10px 12px;
+  background: rgb(15 29 21 / 94%);
+  border: 1px solid #355a43;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  pointer-events: none; /* never steals the pointer from the cards under it */
+}
+
+#card-info[hidden] {
+  display: none;
+}
+
+#card-info p {
+  margin: 6px 0 0;
+}
+
+button {
+  touch-action: manipulation; /* no double-tap zoom on the chrome's buttons */
+}
+
+/* Phones: the prompt gets its own line, with room for two, so the table under the bar
+   does not re-flow every time the prompt changes length. */
+@media (max-width: 719px) {
+  #bar {
+    padding: 8px 12px;
+    gap: 6px 12px;
+  }
+
+  #prompt {
+    flex-basis: 100%;
+    min-height: 2.6em;
+    line-height: 1.3;
+    font-size: 0.95rem;
+  }
+
+  #buttons {
+    min-height: 34px;
+  }
 }
