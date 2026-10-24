@@ -111,7 +111,15 @@ function meet(code: string, role: 'inviter' | 'joiner'): void {
   );
 }
 
+// Trystero encrypts with crypto.subtle, which browsers give only https:// pages and localhost.
+function roomsNeedHttps(): boolean {
+  if (window.isSecureContext) return false;
+  setLobbyMessage('Room codes need a secure page: open this over https:// (npm run dev:https) or on localhost.');
+  return true;
+}
+
 $('create-room').addEventListener('click', () => {
+  if (roomsNeedHttps()) return;
   const code = newRoomCode();
   ($('room-out') as HTMLElement).hidden = false;
   $('room-code-out').textContent = code;
@@ -123,6 +131,7 @@ $('join-room-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const code = parseRoomCode(($('room-code') as HTMLInputElement).value);
   if (code === null) return setLobbyMessage('Room codes are four letters and digits, like K7QX.');
+  if (roomsNeedHttps()) return;
   ($('room-out') as HTMLElement).hidden = true;
   setLobbyMessage(`Looking for room ${code}…`);
   meet(code, 'joiner');
