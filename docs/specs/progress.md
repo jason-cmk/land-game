@@ -4,7 +4,7 @@ Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last update
 
 ## Picking up on another machine
 
-Paused on 2026-10-24 with everything merged to `main` and pushed to `github.com/jason-cmk/land-game` (private). There are no open branches or uncommitted work.
+Paused on 2026-10-25 with `main` pushed to `github.com/jason-cmk/land-game` (private). One local branch is not on `main`: `matching-corner` (b4904d9, "Matching code: small and faded in the table's bottom-right corner", built on `main`, unpushed, from a parallel session); merge or drop it. The `single-player` and `room-codes` worktrees are already merged and can be removed. No uncommitted work.
 
 1. **Set up.** Node 24 or newer (the code runs as TypeScript through Node's type stripping, no build step for tests). Then:
    ```sh
@@ -22,16 +22,17 @@ Paused on 2026-10-24 with everything merged to `main` and pushed to `github.com/
 
 Working notes:
 
-- **Dev hook.** In `npm run dev`, `window.__landGame` exposes the coordinator plus `clickables()`, `cardAt(id)`, `settling()`, `cardInfo()`, `history()`, `peerPresence()`, `playEffects(cues)` and `dropLink()`; `scripts/smoke-browser.mjs` shows how to drive the board with it over the Chrome DevTools protocol (no Playwright).
+- **Dev hook.** In `npm run dev`, `window.__landGame` exposes the coordinator plus `clickables()`, `cardAt(id)` (both give a point on each card that no other card covers, so a click hits it in an overlapping hand or fan), `settling()`, `cardInfo()`, `history()`, `peerPresence()`, `playEffects(cues)` and `dropLink()`; `scripts/smoke-browser.mjs` shows how to drive the board with it over the Chrome DevTools protocol (no Playwright).
 - **Browser automation must wait for `settling()` to reach 0** before clicking, then re-read card positions: Pixi hit-tests cards where they are drawn, new hand cards make their neighbours slide, and on a phone a re-wrapping status bar resizes the table. Bring the tab to the front first (`Page.bringToFront`): headless Chrome throttles animation frames in background tabs, so a background table can look stuck.
 - **Touch is emulated over CDP** with `Emulation.setTouchEmulationEnabled` and `Input.dispatchTouchEvent`; see `tab.click`/`drag`/`longPress` in the smoke script.
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
 - **Rooms in dev:** `?courier=local` makes room codes meet over `BroadcastChannel` between tabs of one browser, `?courier=off` turns them off; without either, dev uses the real public Nostr relays.
+- **Smoke test on a slow machine:** the emulated phone tab is slow (seconds per touch event on the 4-core server), so the board decides tap versus long press from event timestamps, and the smoke test saves `<tag>-stuck-<tab>.png` and says what it tried when a move goes nowhere. Two runs in a row passing is a fair bar before merging.
 - **Next:** not decided; candidates are under Next step.
 
 ## Summary
 
-Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome: code-drawn card art, effect animations, live presence (hover, cursor, drag), drag-to-play, and a visible counter chain. A dropped or reloaded online match reconnects with fresh codes. It works on phones (compact portrait layout, tap and finger drag), hovering or long-pressing a card shows what it does, and a 📜 panel tells the match so far. One player can play a computer opponent in a single tab.
+Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome: code-drawn card art, effect animations, live presence (hover, cursor, drag), drag-to-play, and a visible counter chain. A dropped or reloaded online match reconnects with fresh codes. Plains draws a card (it was Cloudshift); descriptions name lands by mana symbol; battlefields stack into piles by land type; choosing a Forest's target fans the graveyard out; counter decisions are a popup. It works on phones (compact portrait layout, tap and finger drag), hovering or long-pressing a card shows what it does, and a 📜 panel tells the match so far. One player can play a computer opponent in a single tab.
 
 | Layer | Path | Status |
 | --- | --- | --- |
@@ -103,7 +104,7 @@ Nothing on the current list.
 
 ## Next step
 
-Not decided. Candidates: which Trystero strategy carries room codes (Nostr, MQTT, BitTorrent trackers, or several), trying room codes on real phones across two networks, a stronger computer opponent (look-ahead, difficulty levels), rendering on demand (see the open items), the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and real card art (the one open question left in `design.md`).
+Not decided. Candidates: merging or dropping `matching-corner` (see the top), playtesting the new Plains (a plain draw, so Plains and Island now share their played effect; matches are shorter and hands bigger), trying the graveyard fan's pull-out and the counter popup on a real phone, which Trystero strategy carries room codes (Nostr, MQTT, BitTorrent trackers, or several), trying room codes on real phones across two networks, a stronger computer opponent (look-ahead, difficulty levels), rendering on demand (see the open items), the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and real card art (the one open question left in `design.md`).
 
 ## Open items and risks
 
