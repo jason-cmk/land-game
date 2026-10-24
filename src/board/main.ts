@@ -1,5 +1,6 @@
-// Board entry point: the lobby (two tabs, or online via copy-paste codes), the
-// status bar, and the wiring from the coordinator to the prompt and the table.
+// Board entry point: the lobby (the computer, two tabs, or online via copy-paste
+// codes), the status bar, and the wiring from the coordinator to the prompt and
+// the table.
 
 import './style.css';
 import { MatchCoordinator } from '../match/coordinator.ts';
@@ -7,7 +8,9 @@ import type { Snapshot } from '../match/coordinator.ts';
 import type { Message } from '../match/protocol.ts';
 import { DEFAULT_PRIME } from '../match/sra.ts';
 import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
+import { runBot } from '../bot/bot.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
+import { createMemoryPair, localPeer } from '../transport/memory.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
 import { matchId, relinkPanel } from './relink.ts';
 import type { PeerTransport, TransportStatus } from '../transport/types.ts';
@@ -25,6 +28,9 @@ import { Table } from './table.ts';
 import type { Highlight } from './table.ts';
 
 type Link = PeerTransport<Message, Presence>;
+
+/** Who is across the table: the computer, another tab, or someone online. */
+type Mode = 'computer' | 'tabs' | 'online';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -65,7 +71,7 @@ $('tabs-form').addEventListener('submit', (event) => {
   const room = ($('room') as HTMLInputElement).value.trim() || 'table';
   setLobbyMessage(`Waiting for the other tab to open seat ${seat === 0 ? 2 : 1} in room "${room}"…`);
   const key = `land-game/snapshot/${room}/${seat}`;
-  void connectBroadcast<Message, Presence>(room, seat).then((link) => play(link, key, loadSnapshot(key), false));
+  void connectBroadcast<Message, Presence>(room, seat).then((link) => play(link, key, loadSnapshot(key), 'tabs'));
 });
 
 $('invite').addEventListener('click', async () => {
@@ -106,7 +112,7 @@ const ONLINE_KEY = 'land-game/snapshot/online';
 
 function startOnline(link: Link): void {
   saveSnapshot(ONLINE_KEY, null); // a new match replaces any abandoned one
-  play(link, ONLINE_KEY, null, true);
+  play(link, ONLINE_KEY, null, 'online');
 }
 
 // After a reload mid-match: offer to reconnect with fresh codes.
@@ -115,13 +121,60 @@ const unfinishedId = unfinished === null ? null : matchId(unfinished.log);
 if (unfinished !== null && unfinishedId !== null) {
   ($('resume') as HTMLElement).hidden = false;
   $('resume-caption').textContent = `You are seat ${unfinished.seat + 1}, ${unfinished.log.length - 1} moves in.`;
-  const stop = relinkPanel($('resume-panel'), { match: unfinishedId, seat: unfinished.seat }, (link) => play(link, ONLINE_KEY, unfinished, true));
+  const stop = relinkPanel($('resume-panel'), { match: unfinishedId, seat: unfinished.seat }, (link) => play(link, ONLINE_KEY, unfinished, 'online'));
   $('abandon').addEventListener('click', () => {
     if (!confirm('Abandon this match? It cannot be resumed afterwards.')) return;
     stop();
     saveSnapshot(ONLINE_KEY, null);
     ($('resume') as HTMLElement).hidden = true;
   });
+}
+
+// Against the computer: both seats run in this tab, the computer's coordinator
+// over an in-memory link. Each seat keeps its own snapshot, so a reload resumes.
+const COMPUTER_KEYS = ['land-game/snapshot/computer/you', 'land-game/snapshot/computer/bot'] as const;
+
+function playComputer(saved: readonly [Snapshot | null, Snapshot | null]): void {
+  const [mine, theirs] = createMemoryPair<Message>();
+  const persist = (snapshot: Snapshot): void => saveSnapshot(COMPUTER_KEYS[1], snapshot);
+  const bot = saved[1] !== null ? MatchCoordinator.resume(saved[1], theirs, { persist }) : new MatchCoordinator({ seat: 1, prime: DEFAULT_PRIME, transport: theirs, persist });
+  if (saved[1] === null) bot.start();
+  // Save after every change, not only before the computer's own moves: a reload must find both seats.
+  bot.onChange(() => {
+    const snapshot = bot.snapshot();
+    if (bot.status === 'over') saveSnapshot(COMPUTER_KEYS[1], null);
+    else if (snapshot !== null) persist(snapshot);
+  });
+  const table = play(localPeer(mine, 0), COMPUTER_KEYS[0], saved[0], 'computer');
+  // Wait for cards to come to rest, so each move can be seen landing before the next.
+  runBot(bot, { busy: () => table.settling() > 1 });
+}
+
+{
+  const saved = [loadSnapshot(COMPUTER_KEYS[0]), loadSnapshot(COMPUTER_KEYS[1])] as const;
+  let resumable = saved[0] !== null && saved[1] !== null;
+  if (resumable) {
+    $('computer').textContent = 'Carry on';
+    $('computer-hint').textContent = `Your match against the computer is still going, ${saved[0]!.log.length - 1} moves in.`;
+    ($('computer-new') as HTMLElement).hidden = false;
+  }
+  const fresh = (): void => {
+    for (const key of COMPUTER_KEYS) saveSnapshot(key, null);
+    playComputer([null, null]);
+  };
+  $('computer').addEventListener('click', () => {
+    if (!resumable) return fresh();
+    try {
+      playComputer(saved);
+    } catch (err) {
+      // A snapshot that no longer replays (say, from an older version) cannot be carried on.
+      for (const key of COMPUTER_KEYS) saveSnapshot(key, null);
+      resumable = false;
+      $('computer').textContent = 'Play the computer';
+      setLobbyMessage(`That match could not be resumed (${(err as Error).message}). Start a new one.`);
+    }
+  });
+  $('computer-new').addEventListener('click', fresh);
 }
 
 function showCode(caption: string, code: string): void {
@@ -139,10 +192,11 @@ $('copy-code').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Play a match over `link`, resuming `saved` if it is this seat's. `online`
+ * Play a match over `link`, resuming `saved` if it is this seat's. Online
  * matches offer a code swap when the link drops; two tabs just reload.
  */
-function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, online: boolean): void {
+function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode: Mode): Table {
+  const online = mode === 'online';
   $('lobby').hidden = true;
   $('game').hidden = false;
   let link = firstLink;
@@ -154,6 +208,13 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
   } else {
     coordinator = new MatchCoordinator({ seat: link.seat, prime: DEFAULT_PRIME, transport: link, persist });
     coordinator.start();
+  }
+  if (mode === 'computer') {
+    // Both seats live in this tab, so save on every change: a reload must find this seat even before its first move.
+    coordinator.onChange(() => {
+      const snapshot = coordinator.snapshot();
+      if (snapshot !== null && coordinator.status !== 'over') persist(snapshot);
+    });
   }
 
   const table = new Table();
@@ -457,4 +518,5 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
       },
     };
   }
+  return table;
 }

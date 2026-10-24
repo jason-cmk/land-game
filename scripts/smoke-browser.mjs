@@ -6,6 +6,7 @@
 //      reconnect with fresh codes after a dropped link and after a reload
 //   4. a phone-sized touch tab against a desktop tab: taps, touch drags, and the
 //      card info shown by a long press (touch) and a hover (mouse)
+//   5. a full match against the computer in one tab, then one reloaded mid-game
 // Fails on any timeout, lockstep mismatch or console error. Screenshots go to
 // smoke-output/.
 //
@@ -169,7 +170,7 @@ try {
   let seed = 7;
   const rand = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32;
 
-  /** Play by clicking whatever the UI offers, until both finish or `limit` moves. */
+  /** Play by clicking whatever the UI offers, until all finish or `limit` moves. One tab plays the computer. */
   async function playByClicking(tabs, limit, tag) {
     let cardClicks = 0;
     let cardDrags = 0;
@@ -205,9 +206,9 @@ try {
         if (s.kind === 'main' && rand() < 0.5) {
           // Drag it onto the middle of the table; the other tab should see it move.
           const middle = await tab.eval(`(() => { const r = document.getElementById('table').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-          const peer = tabs[1 - i];
+          const peer = tabs.length > 1 ? tabs[1 - i] : null;
           await tab.drag(card, middle, async () => {
-            if (peerSawDrag) return;
+            if (peerSawDrag || peer === null) return;
             for (let k = 0; k < 10 && !peerSawDrag; k++) {
               peerSawDrag = (await peer.eval('window.__landGame.peerPresence().drag')) !== null;
               if (!peerSawDrag) await sleep(30);
@@ -227,7 +228,7 @@ try {
       await waitFor(tabs, (now) => now[i].log > before || now[i].kind !== s.kind || now.every((x) => x.status === 'over'), 5000, `${tag} move ${moves}`);
       if (moves === 12) for (const t of tabs) await t.shot(`${tag}-mid-${t.name}.png`);
     }
-    if (cardDrags > 0 && !peerSawDrag) throw new Error(`${tag}: the opponent never saw a drag`);
+    if (tabs.length > 1 && cardDrags > 0 && !peerSawDrag) throw new Error(`${tag}: the opponent never saw a drag`);
     return { cardClicks, cardDrags, buttonClicks };
   }
 
@@ -411,6 +412,37 @@ try {
     log('desk: hover info', JSON.stringify(hoverInfo));
     if (!hoverInfo?.includes('When played:') || (await h.eval('window.__landGame.cardInfo()')) !== null) throw new Error('desk: hover did not show card info cleanly');
   }
+
+  // --- Against the computer ------------------------------------------------------------
+  log('== against the computer');
+  const solo = await openTab('solo');
+  await solo.eval(`document.getElementById('computer').click()`);
+  await waitFor([solo], (s) => s[0]?.status === 'playing', 20000, 'computer: playing');
+  await solo.shot('computer-start.png');
+  const soloMoves = await playByClicking([solo], 400, 'computer');
+  const soloEnd = await waitFor([solo], (s) => s[0].status === 'over', 60000, 'computer: match over');
+  const botMoves = await solo.eval(`window.__landGame.coordinator.log.filter((e) => e.seat === 1 && e.action.type !== 'grantDrawKey' && e.action.type !== 'revealHandForSwamp').length`);
+  await solo.shot('computer-end.png');
+  log('computer: moves', soloMoves, 'computer moves', botMoves, 'final', { log: soloEnd[0].log, outcome: soloEnd[0].outcome, prompt: soloEnd[0].prompt });
+  if (soloEnd[0].outcome?.kind !== 'win' || botMoves === 0) throw new Error('match against the computer did not finish with a win');
+
+  log('== against the computer: reload mid-game');
+  await solo.eval(`[...document.querySelectorAll('#buttons button')].find((b) => b.textContent === 'New match').click()`);
+  await poll(solo, `document.readyState === 'complete' && document.getElementById('computer')?.textContent === 'Play the computer'`, 'computer: a finished match is not offered again');
+  await solo.eval(`document.getElementById('computer').click()`);
+  await waitFor([solo], (s) => s[0]?.status === 'playing', 20000, 'computer: second match playing');
+  await playByClicking([solo], 8, 'computer-reload');
+  const beforeSoloReload = await state(solo);
+  await solo.eval('location.reload()');
+  await poll(solo, `document.readyState === 'complete' && document.getElementById('computer')?.textContent === 'Carry on'`, 'computer: lobby offers to carry on');
+  await solo.shot('computer-resume-lobby.png');
+  await solo.eval(`document.getElementById('computer').click()`);
+  const afterSoloReload = await waitFor([solo], (s) => s[0]?.status === 'playing' && s[0].log >= beforeSoloReload.log, 20000, 'computer: resumed');
+  await playByClicking([solo], 8, 'computer-resumed');
+  const soloResumed = await state(solo);
+  log('computer reload: log', beforeSoloReload.log, '->', afterSoloReload[0].log, '->', soloResumed.log, soloResumed.status);
+  if (soloResumed.outcome !== null && soloResumed.outcome.kind !== 'win') throw new Error(`computer: resumed match ended badly: ${JSON.stringify(soloResumed.outcome)}`);
+  if (soloResumed.log <= afterSoloReload[0].log && soloResumed.status !== 'over') throw new Error('computer: no moves after resuming');
 
   log('== console errors/warnings:', errors.length ? `\n${errors.join('\n')}` : 'none');
   if (errors.length > 0) throw new Error(`${errors.length} console error(s)`);
