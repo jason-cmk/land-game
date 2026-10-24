@@ -1,6 +1,6 @@
 # Progress
 
-Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile, card info and history added).
+Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile, card info, history and effect polish added).
 
 ## Picking up on another machine
 
@@ -26,7 +26,7 @@ Working notes:
 - **Browser automation must wait for `settling()` to reach 0** before clicking, then re-read card positions: Pixi hit-tests cards where they are drawn, new hand cards make their neighbours slide, and on a phone a re-wrapping status bar resizes the table. Bring the tab to the front first (`Page.bringToFront`): headless Chrome throttles animation frames in background tabs, so a background table can look stuck.
 - **Touch is emulated over CDP** with `Emulation.setTouchEmulationEnabled` and `Input.dispatchTouchEvent`; see `tab.click`/`drag`/`longPress` in the smoke script.
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
-- **The next step is below**: the effect tuning and Swamp reveal moment are self-contained board work in `src/board/fx.ts` and `effects.ts`.
+- **The next step is below**: layer enforcement (dependency rules for the import directions).
 
 ## Summary
 
@@ -44,7 +44,7 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Transport: BroadcastChannel (two tabs) | `src/transport/broadcast.ts` | Done |
 | Transport: WebRTC (copy-paste codes, two data channels) | `src/transport/webrtc.ts`, `signal.ts` | Done |
 | Board: first slice (PixiJS table, HTML chrome, lobby) | `src/board/`, `index.html` | Done |
-| Board: effect animations | `src/board/effects.ts`, `fx.ts` | Done |
+| Board: effect animations (incl. tuned counter / Forest / Swamp, Swamp reveal moment) | `src/board/effects.ts`, `fx.ts`, `table.ts` | Done |
 | Board: presence (hover, cursor, drag) | `src/board/presence.ts` | Done |
 | Board: drag-to-play | `src/board/table.ts`, `controls.ts` | Done |
 | Board: card art (code-drawn, baked textures) | `src/board/art.ts` | First pass |
@@ -74,6 +74,7 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Phones and touch**: below 720 px wide the table uses a compact layout (cards sized by row height, hands overlapping across the full width, slim deck and graveyard columns); the status bar keeps room for a two-line prompt. A finger drag needs 12 px of travel and holds the card above the fingertip; the drop lands where the card is drawn. The canvas now follows its container's size (`ResizeObserver`), fixing the bottom row being cut off when the status bar wrapped. Long-press callouts and menus are suppressed on the canvas. `npm run smoke` has a phone phase (390×844, touch emulation) that plays by taps and finger drags against a desktop tab.
 - **Card info**: a panel above a face-up card says what it does (spec wording; `cardinfo.ts`, unit-tested placement): after a 0.3 s mouse hover, or while a finger long-presses (0.45 s). A long press never plays the card. Checked in the smoke test on both the phone and the desktop tab.
 - **History log**: a 📜 button opens a panel with the match turn by turn in plain words, rebuilt from the log by replaying it through the engine and reading each step with `cuesBetween` (`history.ts`), so it survives reloads. The opponent's draws stay "a card"; the viewer's own are named from its private hand. Unit-tested on a hand-built log from both seats and on random full matches through the real coordinators (a line per play, no named opponent draws, both seats the same length, ends with the result); the smoke test checks both seats' panels after the two-tab match and that the panel fits on the phone.
+- **Effect polish**: the counter (water bolts arcing from the paying cards into the play), countered (cracks, then spinning shards), Forest (a vine growing along the card's path home) and Swamp discard (tendrils, darkening, smoke) now read as clearly as the meteor; impact flashes are additive. The Swamp reveal is a moment: the revealed hand fans out large in the middle over a darkened table, labelled for both seats, while the discard is chosen. Checked frame by frame in headless Chrome on desktop and phone, from both seats.
 - **Tests**: 119 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Online reconnect**: reconnect codes carry the match id (hash of log entry 0) and the inviter's seat, so either player can make one and mismatched codes are refused with a clear message. A dropped link opens a code-swap panel over the table and pauses play; a reloaded tab resumes from the lobby (`sessionStorage` snapshot) or can abandon the match. Tested at the transport level (a match survives its link dying, either seat inviting) and in `npm run smoke` over real WebRTC: a forced drop, then a reload, each followed by more moves in lockstep.
@@ -82,16 +83,11 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 
 ## Not done
 
-1. **Board polish**: effect tuning, Swamp reveal moment.
-2. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
+1. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
 
 ## Next step
 
-Board polish, then layer enforcement:
-
-- **Effect tuning**: the counter (`fx.ts` `counter`/`countered`), Forest regrowth and Swamp discard effects are subtle next to the meteor; make them as readable.
-- **Swamp reveal moment**: when a Swamp makes a player reveal their hand, the revealed cards only flash in place. Give it a moment (e.g. fan the revealed hand toward the middle while the opponent picks the discard).
-- **Layer enforcement**: see *Not done* above.
+- **Layer enforcement**: see *Not done* above. After that, everything in this document's scope is done; what's left are the open items below and the design questions in `design.md`.
 
 ## Open items and risks
 

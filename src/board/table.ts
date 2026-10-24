@@ -49,6 +49,8 @@ interface Place {
   /** The opponent is hovering this card. */
   peer: boolean;
   z: number;
+  /** Tilt in radians (the fanned hand of a Swamp reveal); 0 if absent. */
+  angle?: number;
 }
 
 class CardSprite extends Container {
@@ -112,6 +114,10 @@ export class Table {
   private readonly labels = new Container();
   private readonly fxLayer = new Container();
   private readonly world = new Container(); // everything that shakes
+  /** Darkens the table behind a Swamp-revealed hand, fanned in the middle (see swampMoment). */
+  private readonly scrim = new Graphics();
+  private scrimTarget = 0;
+  private readonly layerLabels: Text[] = [];
   private readonly animations = new Set<{ start: number; frame: (elapsedMS: number) => boolean }>();
   private shake = { until: 0, amplitude: 0, duration: 1 };
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -149,6 +155,9 @@ export class Table {
     this.textures = this.bakeTextures();
     this.mounted = true;
     this.layer.sortableChildren = true;
+    this.scrim.zIndex = 150; // above the table's cards, below the fanned hand (z 160+)
+    this.scrim.alpha = 0;
+    this.layer.addChild(this.scrim);
     this.world.addChild(this.labels, this.layer, this.fxLayer);
     this.peerCursor.visible = false;
     this.app.stage.addChild(this.world, this.peerCursor);
@@ -283,6 +292,10 @@ export class Table {
         return sprite === undefined ? null : { x: sprite.x, y: sprite.y };
       },
       destination: (id) => this.cardPosition(id),
+      size: (id) => {
+        const place = this.cards.get(id)?.target;
+        return place == null ? null : { width: BASE_W * place.scale, height: BASE_H * place.scale, angle: place.angle ?? 0 };
+      },
       hold: (id, ms) => {
         const sprite = this.cards.get(id);
         if (sprite !== undefined) sprite.holdUntil = performance.now() + ms;
@@ -340,6 +353,7 @@ export class Table {
     const pendingCard = view.state.pending?.card ?? null;
     const places = new Map<CardId, Place>();
     this.labels.removeChildren().forEach((child) => child.destroy());
+    for (const label of this.layerLabels.splice(0)) label.destroy();
 
     const rowY = (row: number): number => rowH * row + rowH / 2;
     const highlight = (id: CardId): Highlight => view.highlights.get(id) ?? 'none';
@@ -383,9 +397,11 @@ export class Table {
       this.text(`Graveyard ${graveyard.length}`, sideW / 2, fieldY + cardW * 0.65, scale);
     }
 
-    // The land being played sits in the middle until the counter chain ends.
+    // The land being played sits in the middle until the counter chain ends,
+    // except during a Swamp's discard choice, when the revealed hand takes the middle.
     const pending = view.state.pending;
-    if (pending !== null) {
+    const moment = this.swampMoment(view, places, { width, y: rowY(2), rowH, cardW, scale });
+    if (pending !== null && !moment) {
       places.set(pending.card, {
         x: width / 2,
         y: rowY(2),
@@ -398,6 +414,9 @@ export class Table {
       });
       this.chainLayout(view, places, { width, y: rowY(2), rowH, cardW, scale });
     }
+
+    this.scrimTarget = moment ? 0.6 : 0;
+    this.scrim.clear().rect(0, 0, width, height).fill(0x050b07);
 
     for (const [id, place] of places) {
       let sprite = this.cards.get(id);
@@ -548,6 +567,45 @@ export class Table {
   }
 
   /**
+   * A Swamp (or Plains reusing one) waiting for its controller to pick the discard:
+   * the revealed hand fans out large in the middle over a darkened table, labelled
+   * for whoever is looking. Returns whether the moment is on.
+   */
+  private swampMoment(view: TableView, places: Map<CardId, Place>, at: { width: number; y: number; rowH: number; cardW: number; scale: number }): boolean {
+    const { state, seat } = view;
+    const pending = state.pending;
+    if (state.phase !== 'target' || pending === null) return false;
+    if (pending.land !== 'swamp' && !(pending.land === 'plains' && pending.reuseLand === 'swamp')) return false;
+    const victim = other(pending.controller);
+    const order = this.handOrders[victim];
+    const hand = order.map((id) => state.players[victim].hand.find((s) => s.id === id)).filter((s): s is CardSlot => s !== undefined);
+    if (hand.length === 0 || hand.some((s) => s.land === null)) return false;
+    const { width, y, rowH, cardW, scale } = at;
+    const big = Math.min(1.25, (rowH * 0.95) / BASE_H / scale); // as large as the middle row allows
+    const w = cardW * big;
+    const n = hand.length;
+    const step = n <= 1 ? 0 : Math.min(w * 0.9, (width * 0.9 - w) / (n - 1));
+    hand.forEach((slot, i) => {
+      const offset = i - (n - 1) / 2;
+      places.set(slot.id, {
+        x: width / 2 + offset * step,
+        y: y + offset * offset * 4 * scale, // a gentle arc: outer cards sit lower
+        scale: scale * big,
+        face: slot.land,
+        revealed: false,
+        highlight: view.highlights.get(slot.id) ?? 'none',
+        peer: false,
+        z: 160 + i,
+        angle: offset * Math.min(0.09, 0.5 / n),
+      });
+    });
+    const picking = pending.controller === seat;
+    const label = picking ? 'Their hand, revealed: choose one to discard' : 'Your hand, revealed: they choose one to discard';
+    this.text(label, width / 2, y - (BASE_H * scale * big) / 2 - 22 * scale, scale, 0xe9dcff, this.layer, 170); // clear of the tilted corners
+    return true;
+  }
+
+  /**
    * The counter chain beside the pending play: each paid pair alternates right
    * and left of it (first counter on the right), leaning toward the payer's
    * side, numbered and labelled by who paid. Under the play: what allowing it now would do.
@@ -589,11 +647,14 @@ export class Table {
     }
   }
 
-  private text(content: string, x: number, y: number, scale: number, colour = 0xcfd8cf): void {
+  /** A label on the table; one in `into` other than the labels layer (zIndex z) is cleared by the next layout too. */
+  private text(content: string, x: number, y: number, scale: number, colour = 0xcfd8cf, into: Container = this.labels, z = 0): void {
     const label = new Text({ text: content, style: { fontFamily: 'system-ui, sans-serif', fontSize: 13 * scale, fill: colour } });
     label.anchor.set(0.5);
     label.position.set(x, y);
-    this.labels.addChild(label);
+    label.zIndex = z;
+    if (into !== this.labels) this.layerLabels.push(label);
+    into.addChild(label);
   }
 
   /** Where a card comes to rest: picked cards lift; a card the opponent is touching leans toward the middle of the table. */
@@ -620,6 +681,7 @@ export class Table {
     } else {
       this.world.position.set(0, 0);
     }
+    this.scrim.alpha += (this.scrimTarget - this.scrim.alpha) * t;
     // An opponent drag that stops updating (its end lost on the unreliable channel) lets go.
     if (this.peerDrag !== null && now - this.peerDrag.seen > 600) this.peerDrag = null;
     for (const sprite of this.cards.values()) {
@@ -635,6 +697,7 @@ export class Table {
         sprite.x += (to.x - sprite.x) * follow;
         sprite.y += (to.y - sprite.y) * follow;
         sprite.scale.set(sprite.scale.x + (place.scale * 1.12 - sprite.scale.x) * follow);
+        sprite.rotation += (0 - sprite.rotation) * follow;
         continue;
       }
       if (sprite.holdUntil > now) continue;
@@ -643,6 +706,7 @@ export class Table {
       sprite.y += (at.y - sprite.y) * t;
       const s = sprite.scale.x + (place.scale - sprite.scale.x) * t;
       sprite.scale.set(s);
+      sprite.rotation += ((place.angle ?? 0) - sprite.rotation) * t;
     }
   }
 }

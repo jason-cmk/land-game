@@ -26,10 +26,10 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
 - **Hidden information:** opponent hand cards are backs until revealed; a revealed card stays face-up in their hand, marked with a pale rim and an eye badge.
 - **Effect animations** (`src/board/fx.ts`), one per land effect, layered on top of the card glide:
   - Mountain: a meteor falls on the target with an ember trail; on impact a shockwave ring, debris, a screen shake, and only then does the land leave for the graveyard.
-  - Island counter: the paying cards splash blue and ripples spread from the land on the stack; a countered land shatters into blue shards.
+  - Island counter: the paying cards splash and hold a beat, then a bolt of water arcs from each into the land on the stack, which takes the hit (a flash, ripples, spray, a small shake). A countered land cracks across its face, then bursts into spinning blue shards on its way to the graveyard.
   - Land entering play: a thump (scale bump) and a puff of dust.
-  - Forest: green leaves rise as the land returns to hand.
-  - Swamp: revealed cards flash white; the discarded card dissolves into dark smoke.
+  - Forest: a green glow in the graveyard, then a vine grows along the path the returning card will take to its owner's hand, sprouting leaves; leaves burst where it lands.
+  - Swamp: the reveal is a moment of its own. While the Swamp's controller picks the discard, the revealed hand fans out large and slightly tilted in the middle of the table over a darkened backdrop, labelled "Their hand, revealed: choose one to discard" (or "Your hand, revealed: they choose one to discard"); each card flashes as it arrives, one after another. The Swamp waits in its battlefield spot. The chosen card is grabbed by dark tendrils and darkens, then bursts into smoke; the rest glide back to the hand. A Plains reusing a Swamp gets the same moment.
   - Plains: a golden halo around the land it reuses.
   - Win: a gold fountain and a Victory/Defeat banner.
   Effects only decorate: every card still ends where the layout puts it, so an interrupted effect can never leave the view wrong. With `prefers-reduced-motion`, effects are skipped and only the glide remains.
@@ -44,6 +44,5 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
 - Board layout: battlefield, hand, graveyards, deck counts, turn and phase indicators.
 - Interaction model: whether a targeted drag should draw an arrow to its target instead of lighting targets.
 - How hidden information is shown: what a reveal looks like, whether revealed cards stay marked.
-- Effect tuning: the counter, regrowth and discard effects are deliberately subtle in this first pass.
 - Whether WebAssembly earns a place.
 - Card art beyond this first pass: real illustrations, foil or tilt effects.
