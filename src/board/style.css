@@ -123,4 +123,5 @@ button.quiet {
 
 #table canvas {
   display: block;
+  touch-action: none; /* cards drag; the page must not scroll or zoom under them */
 }

@@ -10,9 +10,9 @@ import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
 import type { PeerTransport } from '../transport/types.ts';
-import { promptFor } from './controls.ts';
+import { dropOutcome, promptFor } from './controls.ts';
 import { cuesBetween } from './effects.ts';
-import { hoverMessage, hoveredCard, peerCursor } from './presence.ts';
+import { dragMessage, hoverMessage, hoveredCard, peerCursor, peerDrag } from './presence.ts';
 import type { Presence } from './presence.ts';
 import { other } from '../engine/types.ts';
 import type { Prompt } from './controls.ts';
@@ -172,6 +172,28 @@ function play(link: Link, snapshotKey: string | null): void {
     }
   });
 
+  // Drag-to-play: the same outcomes as clicking, decided by where the card lands.
+  let dragging: CardId | null = null;
+  table.onDragStart((id) => {
+    dragging = id;
+    const prompt = currentPrompt();
+    // A card with several targets starts targeting as it lifts, so the targets light up.
+    if (prompt?.kind === 'main' && (prompt.playable.get(id)?.length ?? 0) > 1) {
+      picked = id;
+      render();
+    }
+  });
+  table.onDrop((id, over, onTable) => {
+    dragging = null;
+    link.sendPresence({ t: 'dragEnd' });
+    const outcome = dropOutcome(currentPrompt(), id, over, onTable);
+    if (outcome.kind === 'submit') submit(outcome.action);
+    else {
+      picked = outcome.kind === 'pick' ? id : null;
+      render();
+    }
+  });
+
   function render(): void {
     const state = coordinator.state;
     const buttons = $('buttons');
@@ -234,25 +256,43 @@ function play(link: Link, snapshotKey: string | null): void {
     const state = coordinator.state;
     if (state !== null) link.sendPresence(hoverMessage(state, coordinator.seat, table.handOrder(coordinator.seat), id));
   });
-  let lastCursor = 0;
-  table.onPointer((x, y) => {
+  let lastPointer = 0;
+  const throttled = (): boolean => {
     const now = performance.now();
-    if (now - lastCursor < 50) return; // ~20 Hz
-    lastCursor = now;
-    link.sendPresence({ t: 'cursor', x, y });
+    if (now - lastPointer < 50) return false; // ~20 Hz
+    lastPointer = now;
+    return true;
+  };
+  table.onPointer((x, y) => {
+    if (dragging === null && throttled()) link.sendPresence({ t: 'cursor', x, y });
   });
+  table.onDragMove((id, x, y) => {
+    const state = coordinator.state;
+    if (state !== null && throttled()) link.sendPresence(dragMessage(state, coordinator.seat, table.handOrder(coordinator.seat), id, { x, y }));
+  });
+  let peerDragging: Presence | null = null;
+  const showPeerDrag = (): void => {
+    const state = coordinator.state;
+    table.setPeerDrag(state === null || peerDragging === null ? null : peerDrag(state, table.handOrder(other(coordinator.seat)), peerDragging));
+  };
   link.onPresence((message) => {
     if (typeof message !== 'object' || message === null) return;
     if (message.t === 'cursor') table.setPeerCursor(peerCursor(message));
     else if (message.t === 'hoverHand' || message.t === 'hoverBoard') {
       peerHover = message;
       showPeerHover();
+    } else if (message.t === 'dragHand' || message.t === 'dragBoard' || message.t === 'dragEnd') {
+      peerDragging = message.t === 'dragEnd' ? null : message;
+      showPeerDrag();
     }
   });
 
   coordinator.onChange(() => {
     render();
     showPeerHover(); // the hovered card may have moved or gone
+    // A play can overtake its own dragEnd (separate channels); a hand index may now name another card.
+    peerDragging = null;
+    showPeerDrag();
   });
   void table.mount($('table')).then(render);
 

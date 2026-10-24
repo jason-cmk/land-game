@@ -123,3 +123,26 @@ function waitingText(state: GameState, seat: Seat): string {
       return state.activeSeat === other(seat) ? 'Their turn.' : 'Waiting…';
   }
 }
+
+/** What dropping a dragged card does: play it, keep it picked for targeting, or put it back. */
+export type Drop = { readonly kind: 'submit'; readonly action: Action } | { readonly kind: 'pick' } | { readonly kind: 'cancel' };
+
+/**
+ * Dropping `card` onto `over` (the card under the drop point, if any), on the
+ * table (`onTable`) or back over the hand. A drop on a target plays at it; a
+ * drop on the table plays a card with one option, or starts targeting.
+ */
+export function dropOutcome(prompt: Prompt | null, card: CardId, over: CardId | null, onTable: boolean): Drop {
+  if (prompt?.kind === 'declare' && prompt.card === card) {
+    const action = over === null ? undefined : prompt.targets.get(over);
+    if (action !== undefined) return { kind: 'submit', action };
+    return onTable ? { kind: 'pick' } : { kind: 'cancel' };
+  }
+  if (prompt?.kind !== 'main') return { kind: 'cancel' };
+  const actions = prompt.playable.get(card);
+  if (actions === undefined) return { kind: 'cancel' };
+  const aimed = actions.find((a) => a.type === 'play' && a.declaredTarget !== undefined && a.declaredTarget === over);
+  if (aimed !== undefined) return { kind: 'submit', action: aimed };
+  if (!onTable) return { kind: 'cancel' };
+  return actions.length === 1 ? { kind: 'submit', action: actions[0]! } : { kind: 'pick' };
+}

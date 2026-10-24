@@ -267,12 +267,15 @@ Ephemeral, unordered, drop-tolerant channel:
 type Presence = // src/board/presence.ts
   | { t: 'hoverHand'; index: number | null }          // index among the sender's HIDDEN hand cards, in its visual order. Never a CardId.
   | { t: 'hoverBoard'; card: CardId | null }          // any public card: battlefield, graveyard, the stack, revealed hand cards
-  | { t: 'cursor'; x: number; y: number };            // 0-1 in the sender's view; the receiver flips y
-// Planned with drag-to-play: { t: 'dragHand'; index: number; x: number; y: number }
+  | { t: 'cursor'; x: number; y: number }             // 0-1 in the sender's view; the receiver flips y
+  | { t: 'dragHand'; index: number; x: number; y: number } // a hidden hand card being dragged, indexed as for hoverHand
+  | { t: 'dragBoard'; card: CardId; x: number; y: number } // a public card being dragged (a revealed hand card)
+  | { t: 'dragEnd' };                                 // best effort; the receiver also lets go after 0.6 s without updates
 ```
 
 - **Why `hoverHand` and `dragHand` use `index` instead of `CardId`:** each player's board visually shuffles their hand whenever a card is added to it, and keeps the mapping from visual index to `CardId` local. Sending only the visual index `0 .. hand.length - 1` lets the opponent see *which physical card in your hand you are hovering or dragging* (the Hearthstone feel) without ever revealing whether you are hovering a newly drawn card or a card returned from the graveyard by Forest.
 - Coordinates are normalised 0–1 relative to the board, throttled to ~20 Hz.
+- A drag replaces cursor messages while it lasts (its x/y move the cursor dot too). The receiver forgets a drag whenever the game state changes, because the play can overtake its own `dragEnd` on the other channel and a hand index may then name a different card.
 - The receiver validates everything: an out-of-range index, a hidden card named by id, or a non-finite coordinate maps to nothing.
 
 ### Transport interface

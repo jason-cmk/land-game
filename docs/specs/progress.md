@@ -19,7 +19,8 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Transport: WebRTC (copy-paste codes, two data channels) | `src/transport/webrtc.ts`, `signal.ts` | Done |
 | Board: first slice (PixiJS table, HTML chrome, lobby) | `src/board/`, `index.html` | Done |
 | Board: effect animations | `src/board/effects.ts`, `fx.ts` | Done |
-| Board: presence (hover, cursor) | `src/board/presence.ts` | Done |
+| Board: presence (hover, cursor, drag) | `src/board/presence.ts` | Done |
+| Board: drag-to-play | `src/board/table.ts`, `controls.ts` | Done |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -34,20 +35,21 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Board, first slice**: Vite + PixiJS. Lobby for two tabs (room + seat) or online (invite/reply codes); status bar with prompt and choice buttons; table with all zones, gliding cards, gold/red highlights for playable cards and targets, tab-reload resume via `sessionStorage`. Prompts come from a pure `src/board/controls.ts` (unit-tested). Checked in headless Chrome by clicking through: a full two-tab match to a Domain win, a mid-game tab reload, and a real WebRTC connection between two tabs, with no console errors.
 - **Effect animations**: board-side cues derived by diffing consecutive states (unit-tested), played by a small PixiJS effects layer: meteor, counter ripples and shatter, landing dust, regrowth leaves, Swamp smoke and reveal flash, Plains halo, win fountain and banner; skipped under `prefers-reduced-motion`. Verified frame by frame in headless Chrome.
 - **Presence**: hovering a card shows it to the opponent (cyan glow, card leans in) and your pointer appears on their side. Hidden hand cards travel as an index into a locally shuffled hand order, never a slot id; incoming presence is validated. Verified between two headless Chrome tabs.
+- **Drag-to-play**: playable cards can be dragged as well as clicked. Drop on a target, on the table, or back on the hand; what a drop does comes from a pure, unit-tested `dropOutcome` in `controls.ts`. The opponent sees the dragged card follow your pointer (`dragHand`/`dragBoard` presence). `npm run smoke` now plays about a third of its cards by real mouse drags and fails if the opponent never sees one; a separate headless check confirmed a drag dropped straight onto a Forest target, and a drop back on the hand changing nothing.
 - **Coordinator fix found in the browser**: an exception in an `onChange` listener was caught by the message handler and treated as the peer failing verification, so a UI bug forfeited the match. Listener errors now go to `onListenerError` (default: rethrown on a fresh task).
-- **Tests**: 96 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
+- **Tests**: 106 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Tooling**: `npm run dev` (Vite), `npm run build`, `npm run typecheck` (two configs: no-DOM layers, DOM board), `npm test`, `npm run demo`, `npm run smoke` (headless-Chrome play-through of the board). Node 24 type stripping; one runtime dependency (PixiJS).
 
 ## Not done
 
-1. **Board polish**: drag-to-play (with a `dragHand` presence signal), effect tuning, card art, a clearer counter-chain display, Swamp reveal moment.
+1. **Board polish**: effect tuning, card art, a clearer counter-chain display, Swamp reveal moment.
 2. **WebRTC reconnect UI**: a dropped online match needs a fresh invite/reply exchange, then `coordinator.reconnect()`; there is no UI for it yet.
 3. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
 
 ## Next step
 
-Board polish: pick from the list above. Drag-to-play is the remaining big piece of the spec's physical feel; card art and a clearer counter chain are the other visible gaps.
+Board polish: pick from the list above. Card art and a clearer counter chain are the most visible gaps.
 
 ## Open items and risks
 

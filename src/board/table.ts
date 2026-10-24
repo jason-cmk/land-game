@@ -1,7 +1,7 @@
 // The table: a PixiJS (WebGL) scene of both players' zones. Every card is a
 // persistent sprite keyed by CardId that eases toward its laid-out position,
 // so a card visibly travels between zones. The table knows no rules: it draws
-// a GameState from one seat's point of view and reports card clicks.
+// a GameState from one seat's point of view and reports card clicks and drags.
 
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { CardId, CardSlot, GameState, Land, Seat } from '../engine/types.ts';
@@ -56,7 +56,7 @@ class CardSprite extends Container {
   private readonly body = new Graphics();
   private readonly caption = new Text({ text: '', style: { fontFamily: 'Georgia, serif', fontSize: 13, fontWeight: 'bold', fill: 0xffffff } });
 
-  constructor(id: CardId, onTap: (id: CardId) => void, onHover: (id: CardId | null) => void) {
+  constructor(id: CardId, onTap: (id: CardId) => void, onHover: (id: CardId | null) => void, onPress: (id: CardId, event: PointerEvent) => void) {
     super();
     this.id = id;
     this.addChild(this.body, this.caption);
@@ -64,6 +64,7 @@ class CardSprite extends Container {
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.on('pointertap', () => onTap(this.id));
+    this.on('pointerdown', (event) => onPress(this.id, event.nativeEvent as PointerEvent));
     this.on('pointerover', () => onHover(this.id));
     this.on('pointerout', () => onHover(null));
   }
@@ -117,6 +118,15 @@ export class Table {
   private peerHover: CardId | null = null;
   private readonly peerCursor = new Graphics().circle(0, 0, 9).fill({ color: PEER_COLOUR, alpha: 0.35 }).circle(0, 0, 4).fill({ color: PEER_COLOUR, alpha: 0.9 });
   private peerCursorSeen = 0;
+  /** A press on a draggable card; it becomes a drag once the pointer travels. */
+  private press: { id: CardId; x: number; y: number; dragging: boolean } | null = null;
+  /** Set when the current press turned into a drag, so its tap is ignored. */
+  private pressDragged = false;
+  private localDrag: { id: CardId; x: number; y: number } | null = null;
+  private peerDrag: { id: CardId; x: number; y: number; seen: number } | null = null;
+  private onDragStartCard: (id: CardId) => void = () => {};
+  private onDragMoveCard: (id: CardId, x: number, y: number) => void = () => {};
+  private onDropCard: (id: CardId, over: CardId | null, onTable: boolean) => void = () => {};
 
   async mount(host: HTMLElement): Promise<void> {
     await this.app.init({ resizeTo: host, background: 0x14261c, antialias: true, autoDensity: true, resolution: window.devicePixelRatio });
@@ -145,6 +155,24 @@ export class Table {
     this.onHoverCard = handler;
   }
 
+  /** A playable card picked up and moved past the drag threshold. */
+  onDragStart(handler: (id: CardId) => void): void {
+    this.onDragStartCard = handler;
+  }
+
+  /** The dragged card moving, normalised to 0-1 of the table. */
+  onDragMove(handler: (id: CardId, x: number, y: number) => void): void {
+    this.onDragMoveCard = handler;
+  }
+
+  /**
+   * The dragged card released over `over` (the card under the pointer, if
+   * any), on the table or back over the local hand row (`onTable` false).
+   */
+  onDrop(handler: (id: CardId, over: CardId | null, onTable: boolean) => void): void {
+    this.onDropCard = handler;
+  }
+
   /** The local pointer moving, normalised to 0-1 of the table. */
   onPointer(handler: (x: number, y: number) => void): void {
     this.onPointerMove = handler;
@@ -156,9 +184,20 @@ export class Table {
   }
 
   /** What the opponent's presence currently shows (dev tooling). */
-  peerPresence(): { hover: CardId | null; cursor: { x: number; y: number } | null } {
+  peerPresence(): { hover: CardId | null; drag: CardId | null; cursor: { x: number; y: number } | null } {
     const c = this.peerCursor;
-    return { hover: this.peerHover, cursor: c.visible && c.alpha > 0 ? { x: c.x, y: c.y } : null };
+    return { hover: this.peerHover, drag: this.peerDrag?.id ?? null, cursor: c.visible && c.alpha > 0 ? { x: c.x, y: c.y } : null };
+  }
+
+  /** Move the card the opponent is dragging to a normalised position (null lets it go). */
+  setPeerDrag(drag: { card: CardId; at: { x: number; y: number } } | null): void {
+    if (drag === null) {
+      this.peerDrag = null;
+      return;
+    }
+    const { width, height } = this.app.screen;
+    this.peerDrag = { id: drag.card, x: drag.at.x * width, y: drag.at.y * height, seen: performance.now() };
+    this.setPeerCursor(drag.at);
   }
 
   /** Mark the card the opponent is hovering (null clears). */
@@ -302,7 +341,14 @@ export class Table {
     for (const [id, place] of places) {
       let sprite = this.cards.get(id);
       if (sprite === undefined) {
-        sprite = new CardSprite(id, (cid) => this.onCard(cid), (cid) => this.onHoverCard(cid));
+        sprite = new CardSprite(
+          id,
+          (cid) => {
+            if (!this.pressDragged) this.onCard(cid);
+          },
+          (cid) => this.onHoverCard(cid),
+          (cid, event) => this.startPress(cid, event),
+        );
         sprite.position.set(place.x, place.y);
         sprite.scale.set(place.scale);
         this.cards.set(id, sprite);
@@ -310,9 +356,64 @@ export class Table {
       }
       place.peer = id === this.peerHover;
       sprite.target = place;
-      sprite.zIndex = place.z + (place.highlight === 'picked' ? 200 : 0);
       sprite.paint(place);
     }
+  }
+
+  /** Canvas CSS pixels of a DOM pointer event. */
+  private local(event: PointerEvent): { x: number; y: number } {
+    const box = this.app.canvas.getBoundingClientRect();
+    return { x: event.clientX - box.left, y: event.clientY - box.top };
+  }
+
+  /** Playable and picked cards can be dragged; the rest only tapped. */
+  private startPress(id: CardId, event: PointerEvent): void {
+    this.pressDragged = false;
+    const highlight = this.view?.highlights.get(id);
+    if (this.press !== null || (highlight !== 'playable' && highlight !== 'picked')) return;
+    this.press = { id, ...this.local(event), dragging: false };
+    const move = (e: PointerEvent): void => {
+      const press = this.press;
+      if (press === null) return;
+      const at = this.local(e);
+      if (!press.dragging) {
+        if (Math.hypot(at.x - press.x, at.y - press.y) < 6) return;
+        press.dragging = true;
+        this.pressDragged = true;
+        this.onDragStartCard(press.id);
+      }
+      this.localDrag = { id: press.id, ...at };
+      this.onDragMoveCard(press.id, at.x / this.app.screen.width, at.y / this.app.screen.height);
+    };
+    const end = (e: PointerEvent): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      const press = this.press;
+      this.press = null;
+      this.localDrag = null;
+      if (press === null || !press.dragging) return;
+      const at = this.local(e);
+      const dropped = e.type === 'pointerup';
+      // The hand row is the bottom fifth; dropping back there puts the card back.
+      const onTable = dropped && at.y < (this.app.screen.height / 5) * 4;
+      this.onDropCard(press.id, dropped ? this.cardUnder(at, press.id) : null, onTable);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  }
+
+  /** The topmost card laid out under a point, ignoring `except`. */
+  private cardUnder(at: { x: number; y: number }, except: CardId): CardId | null {
+    let best: CardSprite | null = null;
+    for (const sprite of this.cards.values()) {
+      const place = sprite.target;
+      if (place === null || sprite.id === except) continue;
+      if (Math.abs(at.x - place.x) > (BASE_W * place.scale) / 2 || Math.abs(at.y - place.y) > (BASE_H * place.scale) / 2) continue;
+      if (best === null || sprite.zIndex > best.zIndex) best = sprite;
+    }
+    return best?.id ?? null;
   }
 
   private text(content: string, x: number, y: number, scale: number): void {
@@ -340,9 +441,24 @@ export class Table {
     } else {
       this.world.position.set(0, 0);
     }
+    // An opponent drag that stops updating (its end lost on the unreliable channel) lets go.
+    if (this.peerDrag !== null && now - this.peerDrag.seen > 600) this.peerDrag = null;
     for (const sprite of this.cards.values()) {
       const place = sprite.target;
-      if (place === null || sprite.holdUntil > now) continue;
+      if (place === null) continue;
+      const local = this.localDrag?.id === sprite.id ? this.localDrag : null;
+      const peer = this.peerDrag?.id === sprite.id ? this.peerDrag : null;
+      sprite.zIndex = local !== null || peer !== null ? 400 : place.z + (place.highlight === 'picked' ? 200 : 0);
+      if (local !== null || peer !== null) {
+        // A held card follows the pointer: tightly for ours, smoothed for theirs (~20 Hz updates).
+        const follow = local !== null ? 1 - Math.pow(0.001, deltaMS / 60) : t;
+        const to = (local ?? peer)!;
+        sprite.x += (to.x - sprite.x) * follow;
+        sprite.y += (to.y - sprite.y) * follow;
+        sprite.scale.set(sprite.scale.x + (place.scale * 1.12 - sprite.scale.x) * follow);
+        continue;
+      }
+      if (sprite.holdUntil > now) continue;
       // Picked cards lift; a card the opponent is touching leans toward the middle of the table.
       const peerLift = place.peer ? (place.y < this.app.screen.height / 2 ? 12 : -12) : 0;
       const lift = (place.highlight === 'picked' ? -14 : 0) + peerLift;

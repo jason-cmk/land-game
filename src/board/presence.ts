@@ -13,7 +13,11 @@ export type Presence =
   | { readonly t: 'hoverHand'; readonly index: number | null }
   | { readonly t: 'hoverBoard'; readonly card: CardId | null }
   /** Normalised 0-1 in the sender's view. */
-  | { readonly t: 'cursor'; readonly x: number; readonly y: number };
+  | { readonly t: 'cursor'; readonly x: number; readonly y: number }
+  /** A card being dragged, identified like a hover; x/y as for the cursor. */
+  | { readonly t: 'dragHand'; readonly index: number; readonly x: number; readonly y: number }
+  | { readonly t: 'dragBoard'; readonly card: CardId; readonly x: number; readonly y: number }
+  | { readonly t: 'dragEnd' };
 
 /**
  * Keep a hand's visual order across state changes: cards that left are
@@ -69,6 +73,24 @@ export function hoveredCard(state: GameState, theirHandOrder: readonly CardId[],
     return hiddenInOrder(state, theirHandOrder)[index] ?? null;
   }
   return null;
+}
+
+/** What to send while the local player drags `id` to normalised `at`. */
+export function dragMessage(state: GameState, me: Seat, myHandOrder: readonly CardId[], id: CardId, at: { x: number; y: number }): Presence {
+  const hover = hoverMessage(state, me, myHandOrder, id);
+  if (hover.t === 'hoverHand' && hover.index !== null) return { t: 'dragHand', index: hover.index, ...at };
+  if (hover.t === 'hoverBoard' && hover.card !== null) return { t: 'dragBoard', card: hover.card, ...at };
+  return { t: 'dragEnd' };
+}
+
+/** Which card a peer drag moves, and where to in our view; null for anything else. */
+export function peerDrag(state: GameState, theirHandOrder: readonly CardId[], message: Presence): { card: CardId; at: { x: number; y: number } } | null {
+  let card: CardId | null = null;
+  if (message.t === 'dragHand') card = hoveredCard(state, theirHandOrder, { t: 'hoverHand', index: message.index });
+  else if (message.t === 'dragBoard') card = hoveredCard(state, theirHandOrder, { t: 'hoverBoard', card: message.card });
+  else return null;
+  const at = peerCursor({ t: 'cursor', x: message.x, y: message.y });
+  return card === null || at === null ? null : { card, at };
 }
 
 /** A peer cursor in our view: clamped, and flipped because they sit opposite. */

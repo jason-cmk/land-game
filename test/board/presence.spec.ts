@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { apply, createGame } from '../../src/engine/game.ts';
-import { hoverMessage, hoveredCard, isPublic, nextHandOrder, peerCursor } from '../../src/board/presence.ts';
+import { dragMessage, hoverMessage, hoveredCard, isPublic, nextHandOrder, peerCursor, peerDrag } from '../../src/board/presence.ts';
 import type { Presence } from '../../src/board/presence.ts';
 
 test('hand order keeps old positions and shuffles new cards in', () => {
@@ -45,4 +45,19 @@ test('malformed presence maps to nothing; cursors clamp and flip', () => {
   assert.deepEqual(peerCursor({ t: 'cursor', x: -3, y: 7 }), { x: 0, y: 0 });
   assert.equal(peerCursor({ t: 'cursor', x: Number.NaN, y: 0 }), null);
   assert.equal(peerCursor({ t: 'hoverHand', index: 1 }), null);
+});
+
+test('drags travel like hovers: hidden cards by index, coordinates flipped, junk dropped', () => {
+  const s = createGame(0);
+  const mine = ['p0-slot-03', 'p0-slot-00', 'p0-slot-04', 'p0-slot-01', 'p0-slot-02'];
+  const message = dragMessage(s, 0, mine, 'p0-slot-00', { x: 0.4, y: 0.7 });
+  assert.deepEqual(message, { t: 'dragHand', index: 1, x: 0.4, y: 0.7 });
+  const theirs = ['p0-slot-00', 'p0-slot-01', 'p0-slot-02', 'p0-slot-03', 'p0-slot-04'];
+  const seen = peerDrag(s, theirs, message);
+  assert.equal(seen?.card, 'p0-slot-01');
+  assert.ok(Math.abs(seen!.at.x - 0.4) < 1e-9 && Math.abs(seen!.at.y - 0.3) < 1e-9);
+  assert.deepEqual(dragMessage(s, 0, mine, 'p1-slot-00', { x: 0, y: 0 }), { t: 'dragEnd' }, 'not ours to drag');
+  for (const bad of [{ t: 'dragHand', index: 7, x: 0, y: 0 }, { t: 'dragHand', index: 0, x: Number.NaN, y: 0 }, { t: 'dragBoard', card: 'p0-slot-00', x: 0, y: 0 }, { t: 'dragEnd' }] as Presence[]) {
+    assert.equal(peerDrag(s, theirs, bad), null);
+  }
 });

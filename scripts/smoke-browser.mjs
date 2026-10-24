@@ -1,6 +1,6 @@
 // Browser smoke test for the board: starts Vite and headless Chrome, then
 // plays through the real UI over the DevTools protocol (no extra dependencies):
-//   1. a full two-tab match (BroadcastChannel), by clicking cards and buttons
+//   1. a full two-tab match (BroadcastChannel), by clicking and dragging cards
 //   2. a tab reloaded mid-game resumes in lockstep
 //   3. two tabs connect over real WebRTC with the copy-paste codes and play
 // Fails on any timeout, lockstep mismatch or console error. Screenshots go to
@@ -86,6 +86,21 @@ try {
           await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }, sessionId);
         }
       },
+      /** Press at `from`, move in steps to `to`, release; `midway` runs while the card is held. */
+      async drag(from, to, midway) {
+        await send('Page.bringToFront', {}, sessionId);
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y }, sessionId);
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', buttons: 1, clickCount: 1 }, sessionId);
+        const steps = 12;
+        for (let k = 1; k <= steps; k++) {
+          const x = from.x + ((to.x - from.x) * k) / steps;
+          const y = from.y + ((to.y - from.y) * k) / steps;
+          await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'left', buttons: 1 }, sessionId);
+          await sleep(25);
+          if (k === steps / 2 && midway) await midway();
+        }
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', buttons: 0, clickCount: 1 }, sessionId);
+      },
       async shot(file) {
         await send('Page.bringToFront', {}, sessionId);
         await sleep(500);
@@ -116,7 +131,9 @@ try {
   /** Play by clicking whatever the UI offers, until both finish or `limit` moves. */
   async function playByClicking(tabs, limit, tag) {
     let cardClicks = 0;
+    let cardDrags = 0;
     let buttonClicks = 0;
+    let peerSawDrag = false;
     for (let moves = 0; moves < limit; moves++) {
       const states = await Promise.all(tabs.map(state));
       if (states.every((s) => s.status === 'over')) break;
@@ -134,8 +151,22 @@ try {
       if (useCard) {
         const card = s.cards[Math.floor(rand() * s.cards.length)];
         await sleep(450); // let the sprite settle where the layout put it
-        await tab.click(card.x, card.y);
-        cardClicks++;
+        if (s.kind === 'main' && rand() < 0.5) {
+          // Drag it onto the middle of the table; the other tab should see it move.
+          const middle = await tab.eval(`(() => { const r = document.getElementById('table').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+          const peer = tabs[1 - i];
+          await tab.drag(card, middle, async () => {
+            if (peerSawDrag) return;
+            for (let k = 0; k < 10 && !peerSawDrag; k++) {
+              peerSawDrag = (await peer.eval('window.__landGame.peerPresence().drag')) !== null;
+              if (!peerSawDrag) await sleep(30);
+            }
+          });
+          cardDrags++;
+        } else {
+          await tab.click(card.x, card.y);
+          cardClicks++;
+        }
       } else if (buttons.length > 0) {
         const label = buttons[Math.floor(rand() * buttons.length)];
         await tab.eval(`[...document.querySelectorAll('#buttons button')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
@@ -145,7 +176,8 @@ try {
       await waitFor(tabs, (now) => now[i].log > before || now[i].kind !== s.kind || now.every((x) => x.status === 'over'), 5000, `${tag} move ${moves}`);
       if (moves === 12) for (const t of tabs) await t.shot(`${tag}-mid-${t.name}.png`);
     }
-    return { cardClicks, buttonClicks };
+    if (cardDrags > 0 && !peerSawDrag) throw new Error(`${tag}: the opponent never saw a drag`);
+    return { cardClicks, cardDrags, buttonClicks };
   }
 
   // --- Two tabs over BroadcastChannel ------------------------------------------------

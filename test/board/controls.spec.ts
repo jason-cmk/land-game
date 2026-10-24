@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import { apply, createGame, legalActions } from '../../src/engine/game.ts';
 import type { CardId, GameState, Land } from '../../src/engine/types.ts';
-import { promptFor } from '../../src/board/controls.ts';
+import { dropOutcome, promptFor } from '../../src/board/controls.ts';
 
 function act(state: GameState, seat: 0 | 1, action: Parameters<typeof apply>[2]): GameState {
   return apply(state, seat, action);
@@ -68,4 +68,43 @@ test('game over reads from the viewer’s side', () => {
   s = act(s, 1, { type: 'resign' });
   assert.equal(promptFor(s, 0, []).text, 'You win by resignation.');
   assert.equal(promptFor(s, 1, []).text, 'You lose by resignation.');
+});
+
+test('dropping a dragged card: on the table plays it, on a target aims it, back on the hand cancels', () => {
+  let s = createGame(0);
+  const island = new Map<CardId, Land>([['p0-slot-00', 'island']]);
+  const opening = promptFor(s, 0, legalActions(s, 0, island));
+  assert.deepEqual(dropOutcome(opening, 'p0-slot-00', null, true), { kind: 'submit', action: { type: 'play', card: 'p0-slot-00', land: 'island' } });
+  assert.deepEqual(dropOutcome(opening, 'p0-slot-00', null, false), { kind: 'cancel' });
+  assert.deepEqual(dropOutcome(opening, 'p0-slot-01', null, true), { kind: 'cancel' }, 'not playable');
+
+  // Seat 0 holds a Mountain facing two opponent lands (as in the declare test above).
+  for (const [seat, action] of [
+    [0, { type: 'play', card: 'p0-slot-00', land: 'island' }],
+    [1, { type: 'allow' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-05' }],
+    [0, { type: 'grantDrawKey', card: 'p1-slot-05' }],
+    [1, { type: 'play', card: 'p1-slot-00', land: 'forest' }],
+    [0, { type: 'allow' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-06' }],
+    [0, { type: 'pass' }],
+    [0, { type: 'grantDrawKey', card: 'p1-slot-06' }],
+    [1, { type: 'play', card: 'p1-slot-01', land: 'island' }],
+    [0, { type: 'allow' }],
+    [0, { type: 'grantDrawKey', card: 'p1-slot-07' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-07' }],
+  ] as const) s = act(s, seat, action);
+  const priv = new Map<CardId, Land>([['p0-slot-01', 'mountain']]);
+  const actions = legalActions(s, 0, priv);
+  const main = promptFor(s, 0, actions);
+  const aimed = { type: 'play', card: 'p0-slot-01', land: 'mountain', declaredTarget: 'p1-slot-01' };
+  assert.deepEqual(dropOutcome(main, 'p0-slot-01', 'p1-slot-01', true), { kind: 'submit', action: aimed });
+  assert.deepEqual(dropOutcome(main, 'p0-slot-01', null, true), { kind: 'pick' }, 'two targets: start targeting');
+  assert.deepEqual(dropOutcome(main, 'p0-slot-01', 'p0-slot-00', true), { kind: 'pick' }, 'not a legal target');
+
+  // Once picked (drag start does this), the drop resolves against the declare prompt.
+  const declare = promptFor(s, 0, actions, 'p0-slot-01');
+  assert.deepEqual(dropOutcome(declare, 'p0-slot-01', 'p1-slot-01', false), { kind: 'submit', action: aimed }, 'a target counts wherever it sits');
+  assert.deepEqual(dropOutcome(declare, 'p0-slot-01', null, true), { kind: 'pick' });
+  assert.deepEqual(dropOutcome(declare, 'p0-slot-01', null, false), { kind: 'cancel' });
 });
