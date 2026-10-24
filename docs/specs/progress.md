@@ -2,6 +2,31 @@
 
 Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24.
 
+## Picking up on another machine
+
+Paused on 2026-10-24 with everything merged to `main` and pushed to `github.com/jason-cmk/land-game` (private). There are no open branches or uncommitted work.
+
+1. **Set up.** Node 24 or newer (the code runs as TypeScript through Node's type stripping, no build step for tests). Then:
+   ```sh
+   git clone https://github.com/jason-cmk/land-game.git
+   cd land-game
+   npm install
+   ```
+2. **Check it works.** All four should pass:
+   - `npm run typecheck`
+   - `npm test`: 111 tests
+   - `npm run demo`
+   - `npm run smoke`: drives the board in headless Chrome (a two-tab match, a reload, then WebRTC with a forced drop and a reload). It needs Google Chrome; the default path is the macOS one, so elsewhere set `CHROME_PATH` (e.g. `/usr/bin/google-chrome`). It uses ports 5199 and 9333 and writes screenshots to `smoke-output/` (gitignored).
+3. **Play it.** `npm run dev`, then open http://localhost:5173 in two tabs, enter the same room in both and take seat 1 and seat 2. For online play, one player clicks *Create an invite*, the other pastes it and sends back the reply code.
+4. **Read before changing behaviour:** `AGENT.md`, then `spec.md` (source of truth), `tech.md`, `design.md`.
+
+Working notes:
+
+- **Dev hook.** In `npm run dev`, `window.__landGame` exposes the coordinator plus `clickables()`, `cardAt(id)`, `settling()`, `peerPresence()`, `playEffects(cues)` and `dropLink()`; `scripts/smoke-browser.mjs` shows how to drive the board with it over the Chrome DevTools protocol (no Playwright).
+- **Browser automation must wait for `settling()` to reach 0** before clicking: Pixi hit-tests cards where they are drawn, and new hand cards make their neighbours slide.
+- **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
+- **The next step is below**: the effect tuning and Swamp reveal moment are self-contained board work in `src/board/fx.ts` and `effects.ts`.
+
 ## Summary
 
 Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome: code-drawn card art, effect animations, live presence (hover, cursor, drag), drag-to-play, and a visible counter chain. A dropped or reloaded online match reconnects with fresh codes.
@@ -55,11 +80,17 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 
 ## Next step
 
-Board polish: effect tuning and the Swamp reveal moment. Then layer enforcement.
+Board polish, then layer enforcement:
+
+- **Effect tuning**: the counter (`fx.ts` `counter`/`countered`), Forest regrowth and Swamp discard effects are subtle next to the meteor; make them as readable.
+- **Swamp reveal moment**: when a Swamp makes a player reveal their hand, the revealed cards only flash in place. Give it a moment (e.g. fan the revealed hand toward the middle while the opponent picks the discard).
+- **Layer enforcement**: see *Not done* above.
 
 ## Open items and risks
 
 - SRA is malleable and not IND-CPA; accepted for a homebrew game (see `tech.md`).
 - The modulus is a fixed 256-bit safe prime by choice (homebrew game, fast setup); a larger one can be swapped in later.
 - A player who disconnects and never returns is unresolved (no arbiter).
-- The default STUN server is Google's public one: third-party, sees connection metadata only. Confirm this fits "no server at all".
+- The default STUN server is Google's public one: third-party, sees connection metadata only. Still to be confirmed that this fits "no server at all".
+- Known quirk: when a hand mixes revealed and hidden cards, the opponent's view of a hovered hand card can sit one position off (see `design.md` § Presence).
+- An online match's saved state lives in `sessionStorage`: it survives a reload, not closing the tab.

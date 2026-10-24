@@ -8,7 +8,7 @@ Read these before changing behaviour. The spec is the source of truth; anything 
 
 - `docs/specs/spec.md`: game rules and product brief
 - `docs/tech/tech.md`: engine, state/event model, cryptography, lockstep protocol, transport
-- `docs/design/design.md`: UI/UX design (stub)
+- `docs/design/design.md`: UI/UX design: what's decided for the board, and open questions
 - `docs/specs/progress.md`: what's done, what's next, open risks. Update it when work lands.
 
 ## Layout
