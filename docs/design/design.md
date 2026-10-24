@@ -20,7 +20,7 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
 - **Cards glide between zones.** Every card is one persistent sprite that eases toward its new position, so plays, counters and destroys read as movement before any bespoke animation exists.
 - **Click or drag.** Playable hand cards glow gold. Clicking one plays it, or, if it needs a declared target, lifts it and makes the valid targets glow red; click a target to play, anything else to cancel. The same cards can be dragged: the card follows the pointer, and a card with several targets lights its targets as it lifts. Drop it on a target to play it there, anywhere above your hand row to play it (or, with several targets, to leave it picked for a click), or back on your hand to put it back. A press only becomes a drag after 6 px of travel, so a slightly shaky click still clicks. Counter-chain choices (allow, or each Island + other pair) and Pass are buttons in the status bar. Resign asks for confirmation.
 - **Forced moves are invisible.** Granting draw keys and revealing a hand to Swamp happen automatically.
-- **Hidden information:** opponent hand cards are backs until revealed; a revealed card stays face-up in their hand with a light strip along the bottom.
+- **Hidden information:** opponent hand cards are backs until revealed; a revealed card stays face-up in their hand, marked with a pale rim and an eye badge.
 - **Effect animations** (`src/board/fx.ts`), one per land effect, layered on top of the card glide:
   - Mountain: a meteor falls on the target with an ember trail; on impact a shockwave ring, debris, a screen shake, and only then does the land leave for the graveyard.
   - Island counter: the paying cards splash blue and ripples spread from the land on the stack; a countered land shatters into blue shards.
@@ -32,7 +32,7 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
   Effects only decorate: every card still ends where the layout puts it, so an interrupted effect can never leave the view wrong. With `prefers-reduced-motion`, effects are skipped and only the glide remains.
 - **Presence** (`src/board/presence.ts`): the card under the opponent's pointer gets a cyan glow and leans toward the middle of the table, and their pointer shows as a cyan dot (flipped to your side, fading after 2 s idle). Hands keep a local visual order that shuffles each new card in, and a hidden hand card is sent only as its index among the sender's hidden cards in that order, so the opponent sees which card you touch but never which slot it is. A drag travels the same way: the opponent sees that card (a back, if hidden) pulled out of your hand and following your pointer, smoothed between ~20 Hz updates; if the updates stop for 0.6 s (the end message is lost on the unreliable channel) it drops back into place. Known quirk: when a hand mixes revealed and hidden cards, the two views may interleave them differently, so the lifted back can sit a position away from the cursor.
 - **Where effects come from:** the engine returns states, not events, so the board compares consecutive states (`src/board/effects.ts`): each card that changed zone becomes a cue, labelled by the pending play that caused it. This keeps the engine untouched; if engine events are added later, cues can come from them instead.
-- **Placeholder art:** coloured card faces with the land name; a brown abstract card back.
+- **Card art** (`src/board/art.ts`), drawn in code and baked into one texture per design when the table mounts, so the table costs no more to draw than flat rectangles: each basic land has an MTG-style layout (name bar, a small landscape, "Basic Land" type line, a large mana symbol in the text box). Plains: sun over fields; Island: islet and waves; Swamp: moon, dead tree, bog; Mountain: snow-capped peaks; Forest: layered pines. The card back is a leather-brown oval carrying the five land colours in a ring. A hand card the opponent has seen gets a pale rim and an eye badge in the corner.
 
 ## Questions to resolve here
 
@@ -41,4 +41,4 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
 - How hidden information is shown: what a reveal looks like, whether revealed cards stay marked.
 - Effect tuning: the counter, regrowth and discard effects are deliberately subtle in this first pass.
 - Whether WebAssembly earns a place.
-- Card and card-back visual design.
+- Card art beyond this first pass: real illustrations, foil or tilt effects.

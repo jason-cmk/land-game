@@ -3,10 +3,11 @@
 // so a card visibly travels between zones. The table knows no rules: it draws
 // a GameState from one seat's point of view and reports card clicks and drags.
 
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
+import type { Texture } from 'pixi.js';
 import type { CardId, CardSlot, GameState, Land, Seat } from '../engine/types.ts';
 import { other } from '../engine/types.ts';
-import { landName } from './controls.ts';
+import { CARD_H, CARD_W, drawBack, drawFace } from './art.ts';
 import type { Cue } from './effects.ts';
 import { playCues } from './fx.ts';
 import { nextHandOrder } from './presence.ts';
@@ -22,18 +23,17 @@ export interface TableView {
   readonly highlights: ReadonlyMap<CardId, Highlight>;
 }
 
-const LAND_COLOURS: Record<Land, { fill: number; ink: number }> = {
-  forest: { fill: 0x3f7d4e, ink: 0xeaf5e4 },
-  island: { fill: 0x3a6fb0, ink: 0xe8f1fb },
-  mountain: { fill: 0xb5533c, ink: 0xfbece6 },
-  plains: { fill: 0xe8dcae, ink: 0x4a3f22 },
-  swamp: { fill: 0x4b3f56, ink: 0xeee6f3 },
-};
 const PEER_COLOUR = 0x7fdcff;
 const HIGHLIGHT_COLOURS: Record<Exclude<Highlight, 'none'>, number> = { playable: 0xf4d35e, target: 0xe4572e, picked: 0xffffff };
 
-const BASE_W = 80;
-const BASE_H = 112;
+const BASE_W = CARD_W;
+const BASE_H = CARD_H;
+
+/** The baked card textures: one per land face, and the back. */
+interface CardTextures {
+  readonly faces: Record<Land, Texture>;
+  readonly back: Texture;
+}
 
 interface Place {
   x: number;
@@ -53,14 +53,19 @@ class CardSprite extends Container {
   /** performance.now() until which an effect keeps this card where it is. */
   holdUntil = 0;
   private drawn = '';
-  private readonly body = new Graphics();
-  private readonly caption = new Text({ text: '', style: { fontFamily: 'Georgia, serif', fontSize: 13, fontWeight: 'bold', fill: 0xffffff } });
+  private readonly glow = new Graphics();
+  private readonly art: Sprite;
+  private readonly marks = new Graphics();
+  private readonly textures: CardTextures;
 
-  constructor(id: CardId, onTap: (id: CardId) => void, onHover: (id: CardId | null) => void, onPress: (id: CardId, event: PointerEvent) => void) {
+  constructor(id: CardId, textures: CardTextures, onTap: (id: CardId) => void, onHover: (id: CardId | null) => void, onPress: (id: CardId, event: PointerEvent) => void) {
     super();
     this.id = id;
-    this.addChild(this.body, this.caption);
-    this.caption.anchor.set(0.5);
+    this.textures = textures;
+    this.art = new Sprite(textures.back);
+    this.art.anchor.set(0.5);
+    this.art.setSize(BASE_W, BASE_H);
+    this.addChild(this.glow, this.art, this.marks);
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.on('pointertap', () => onTap(this.id));
@@ -74,28 +79,25 @@ class CardSprite extends Container {
     const key = `${place.face}|${place.revealed}|${place.highlight}|${place.peer}`;
     if (key === this.drawn) return;
     this.drawn = key;
-    const g = this.body.clear();
+    const g = this.glow.clear();
     const x = -BASE_W / 2;
     const y = -BASE_H / 2;
     if (place.peer) g.roundRect(x - 7, y - 7, BASE_W + 14, BASE_H + 14, 12).fill({ color: PEER_COLOUR, alpha: 0.35 });
     if (place.highlight !== 'none') {
       g.roundRect(x - 4, y - 4, BASE_W + 8, BASE_H + 8, 10).fill({ color: HIGHLIGHT_COLOURS[place.highlight], alpha: 0.9 });
     }
-    if (place.face === null) {
-      g.roundRect(x, y, BASE_W, BASE_H, 7).fill(0x2b2118).stroke({ width: 2, color: 0x8a6d3b });
-      g.ellipse(0, 0, BASE_W * 0.3, BASE_H * 0.33).stroke({ width: 3, color: 0x8a6d3b });
-      g.ellipse(0, 0, BASE_W * 0.16, BASE_H * 0.18).fill({ color: 0x8a6d3b, alpha: 0.6 });
-      this.caption.text = '';
-      return;
+    this.art.texture = place.face === null ? this.textures.back : this.textures.faces[place.face];
+    this.art.setSize(BASE_W, BASE_H);
+    // A hand card the opponent has seen: a pale rim and an eye in the corner.
+    const m = this.marks.clear();
+    if (place.revealed) {
+      m.roundRect(x + 1, y + 1, BASE_W - 2, BASE_H - 2, 6).stroke({ width: 2, color: 0xffffff, alpha: 0.7 });
+      const ex = x + BASE_W - 10;
+      const ey = y + 10;
+      m.circle(ex, ey, 7).fill({ color: 0x161616, alpha: 0.85 });
+      m.ellipse(ex, ey, 5, 3).fill(0xffffff);
+      m.circle(ex, ey, 1.8).fill(0x161616);
     }
-    const colours = LAND_COLOURS[place.face];
-    g.roundRect(x, y, BASE_W, BASE_H, 7).fill(0x1c1c1c);
-    g.roundRect(x + 4, y + 4, BASE_W - 8, BASE_H - 8, 5).fill(colours.fill);
-    g.circle(0, 8, 18).fill({ color: colours.ink, alpha: 0.25 });
-    if (place.revealed) g.roundRect(x + 4, y + BASE_H - 18, BASE_W - 8, 14, 3).fill({ color: 0xffffff, alpha: 0.35 });
-    this.caption.text = landName(place.face);
-    this.caption.style.fill = colours.ink;
-    this.caption.position.set(0, y + 16);
   }
 }
 
@@ -111,6 +113,7 @@ export class Table {
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private view: TableView | null = null;
   private mounted = false;
+  private textures: CardTextures | null = null;
   private onCard: (id: CardId) => void = () => {};
   private onHoverCard: (id: CardId | null) => void = () => {};
   private onPointerMove: (x: number, y: number) => void = () => {};
@@ -131,6 +134,7 @@ export class Table {
   async mount(host: HTMLElement): Promise<void> {
     await this.app.init({ resizeTo: host, background: 0x14261c, antialias: true, autoDensity: true, resolution: window.devicePixelRatio });
     host.appendChild(this.app.canvas);
+    this.textures = this.bakeTextures();
     this.mounted = true;
     this.layer.sortableChildren = true;
     this.world.addChild(this.labels, this.layer, this.fxLayer);
@@ -144,6 +148,17 @@ export class Table {
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
     this.app.renderer.on('resize', () => this.layout());
     this.layout();
+  }
+
+  /** Draw each card design once into a texture, sharp at the largest on-screen size. */
+  private bakeTextures(): CardTextures {
+    const bake = (art: Container): Texture => {
+      const texture = this.app.renderer.generateTexture({ target: art, resolution: 2 * Math.max(2, window.devicePixelRatio), antialias: true });
+      art.destroy({ children: true });
+      return texture;
+    };
+    const lands: Land[] = ['forest', 'island', 'mountain', 'plains', 'swamp'];
+    return { faces: Object.fromEntries(lands.map((land) => [land, bake(drawFace(land))])) as Record<Land, Texture>, back: bake(drawBack()) };
   }
 
   onCardClick(handler: (id: CardId) => void): void {
@@ -357,6 +372,7 @@ export class Table {
       if (sprite === undefined) {
         sprite = new CardSprite(
           id,
+          this.textures!,
           (cid) => {
             if (!this.pressDragged) this.onCard(cid);
           },
