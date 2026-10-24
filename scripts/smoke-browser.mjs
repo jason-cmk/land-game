@@ -2,7 +2,8 @@
 // plays through the real UI over the DevTools protocol (no extra dependencies):
 //   1. a full two-tab match (BroadcastChannel), by clicking and dragging cards
 //   2. a tab reloaded mid-game resumes in lockstep
-//   3. two tabs connect over real WebRTC with the copy-paste codes and play
+//   3. two tabs connect over real WebRTC with the copy-paste codes and play, then
+//      reconnect with fresh codes after a dropped link and after a reload
 // Fails on any timeout, lockstep mismatch or console error. Screenshots go to
 // smoke-output/.
 //
@@ -254,6 +255,50 @@ try {
   const online = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'webrtc: heads converge');
   log('online: log', online.map((s) => s.log), 'heads equal', online[0].head === online[1].head);
   for (const t of [e, f]) await t.shot(`online-${t.name}.png`);
+
+  /** Poll an expression in a tab until it is truthy. */
+  async function poll(tab, expression, what, ms = 20000) {
+    const end = Date.now() + ms;
+    for (;;) {
+      const value = await tab.eval(expression);
+      if (value) return value;
+      if (Date.now() > end) throw new Error(`timeout: ${what}`);
+      await sleep(100);
+    }
+  }
+  /** Swap reconnect codes: `inviter` makes a code in its panel, `joiner` answers it in its own. */
+  async function swapCodes(inviter, inviterPanel, joiner, joinerPanel) {
+    const button = (panel, text) => `[...document.querySelectorAll('${panel} button')].find((b) => b.textContent === ${JSON.stringify(text)})`;
+    await inviter.eval(`${button(inviterPanel, 'Make a reconnect code')}.click()`);
+    const code = await poll(inviter, `document.querySelector('${inviterPanel} textarea[readonly]')?.value`, 'reconnect code');
+    await joiner.eval(`(() => { document.querySelector('${joinerPanel} textarea').value = ${JSON.stringify(code)}; ${button(joinerPanel, 'Use their code')}.click(); })()`);
+    const reply = await poll(joiner, `document.querySelector('${joinerPanel} textarea[readonly]')?.value`, 'reconnect reply');
+    await inviter.eval(`(() => { const areas = document.querySelectorAll('${inviterPanel} textarea'); areas[areas.length - 1].value = ${JSON.stringify(reply)}; ${button(inviterPanel, 'Connect')}.click(); })()`);
+  }
+
+  log('== online: the link drops mid-game');
+  await e.eval('window.__landGame.dropLink()');
+  for (const t of [e, f]) await poll(t, `!document.getElementById('reconnect').hidden`, `${t.name}: reconnect panel`);
+  await f.shot('online-dropped-joiner.png');
+  // Seat 2 makes the code this time; the inviter's seat travels in it.
+  await swapCodes(f, '#reconnect-panel', e, '#reconnect-panel');
+  const relinked = await waitFor([e, f], (s) => s.every((x) => x?.status === 'playing') && s[0].head === s[1].head, 20000, 'drop: resynced');
+  for (const t of [e, f]) await poll(t, `document.getElementById('reconnect').hidden`, `${t.name}: panel closes`);
+  await playByClicking([e, f], 8, 'online-relinked');
+  const afterDrop = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'drop: heads converge');
+  log('drop: log', relinked[0].log, '->', afterDrop[0].log, 'heads equal', afterDrop[0].head === afterDrop[1].head);
+
+  log('== online: a tab reloads mid-game');
+  if (afterDrop.some((x) => x.status === 'over')) throw new Error('match ended before the reload check; raise the move budget');
+  await f.eval('location.reload()');
+  await poll(f, `document.readyState === 'complete' && !document.getElementById('resume').hidden`, 'lobby offers to resume');
+  await poll(e, `!document.getElementById('reconnect').hidden`, 'peer sees the drop');
+  await f.shot('online-resume-lobby.png');
+  await swapCodes(f, '#resume-panel', e, '#reconnect-panel');
+  const resumed = await waitFor([e, f], (s) => s.every((x) => x?.status === 'playing') && s[0].head === s[1].head, 20000, 'reload: resynced');
+  await playByClicking([e, f], 8, 'online-resumed');
+  const afterResume = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'reload: heads converge');
+  log('reload: log', resumed[1].log, '->', afterResume[1].log, 'heads equal', afterResume[0].head === afterResume[1].head);
 
   log('== console errors/warnings:', errors.length ? `\n${errors.join('\n')}` : 'none');
   if (errors.length > 0) throw new Error(`${errors.length} console error(s)`);

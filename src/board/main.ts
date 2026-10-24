@@ -9,7 +9,8 @@ import { DEFAULT_PRIME } from '../match/sra.ts';
 import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
-import type { PeerTransport } from '../transport/types.ts';
+import { matchId, relinkPanel } from './relink.ts';
+import type { PeerTransport, TransportStatus } from '../transport/types.ts';
 import { dropOutcome, promptFor } from './controls.ts';
 import { counterChain } from './chain.ts';
 import type { ChainStep } from './chain.ts';
@@ -61,7 +62,8 @@ $('tabs-form').addEventListener('submit', (event) => {
   const seat = Number(submitter.value) as Seat;
   const room = ($('room') as HTMLInputElement).value.trim() || 'table';
   setLobbyMessage(`Waiting for the other tab to open seat ${seat === 0 ? 2 : 1} in room "${room}"…`);
-  void connectBroadcast<Message, Presence>(room, seat).then((link) => play(link, `land-game/snapshot/${room}/${seat}`));
+  const key = `land-game/snapshot/${room}/${seat}`;
+  void connectBroadcast<Message, Presence>(room, seat).then((link) => play(link, key, loadSnapshot(key), false));
 });
 
 $('invite').addEventListener('click', async () => {
@@ -75,7 +77,7 @@ $('invite').addEventListener('click', async () => {
       try {
         setLobbyMessage('Connecting…');
         const link = await invite.accept(($('reply-code') as HTMLTextAreaElement).value);
-        play(link, null);
+        startOnline(link);
       } catch (err) {
         setLobbyMessage(String((err as Error).message));
       }
@@ -91,11 +93,34 @@ $('join').addEventListener('click', async () => {
     const join = await joinInvite<Message, Presence>(($('invite-code') as HTMLTextAreaElement).value);
     showCode('Send this reply code back to the inviter:', join.code);
     setLobbyMessage('Waiting for them to paste it…');
-    play(await join.transport, null);
+    startOnline(await join.transport);
   } catch (err) {
     setLobbyMessage(String((err as Error).message));
   }
 });
+
+/** An online match keeps a snapshot per tab, so a reload can reconnect to it. */
+const ONLINE_KEY = 'land-game/snapshot/online';
+
+function startOnline(link: Link): void {
+  saveSnapshot(ONLINE_KEY, null); // a new match replaces any abandoned one
+  play(link, ONLINE_KEY, null, true);
+}
+
+// After a reload mid-match: offer to reconnect with fresh codes.
+const unfinished = loadSnapshot(ONLINE_KEY);
+const unfinishedId = unfinished === null ? null : matchId(unfinished.log);
+if (unfinished !== null && unfinishedId !== null) {
+  ($('resume') as HTMLElement).hidden = false;
+  $('resume-caption').textContent = `You are seat ${unfinished.seat + 1}, ${unfinished.log.length - 1} moves in.`;
+  const stop = relinkPanel($('resume-panel'), { match: unfinishedId, seat: unfinished.seat }, (link) => play(link, ONLINE_KEY, unfinished, true));
+  $('abandon').addEventListener('click', () => {
+    if (!confirm('Abandon this match? It cannot be resumed afterwards.')) return;
+    stop();
+    saveSnapshot(ONLINE_KEY, null);
+    ($('resume') as HTMLElement).hidden = true;
+  });
+}
 
 function showCode(caption: string, code: string): void {
   ($('code-out') as HTMLElement).hidden = false;
@@ -111,14 +136,16 @@ $('copy-code').addEventListener('click', () => {
 // Match
 // ---------------------------------------------------------------------------
 
-function play(link: Link, snapshotKey: string | null): void {
+/**
+ * Play a match over `link`, resuming `saved` if it is this seat's. `online`
+ * matches offer a code swap when the link drops; two tabs just reload.
+ */
+function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, online: boolean): void {
   $('lobby').hidden = true;
   $('game').hidden = false;
+  let link = firstLink;
 
-  const persist = (snapshot: Snapshot): void => {
-    if (snapshotKey !== null) saveSnapshot(snapshotKey, snapshot);
-  };
-  const saved = snapshotKey === null ? null : loadSnapshot(snapshotKey);
+  const persist = (snapshot: Snapshot): void => saveSnapshot(snapshotKey, snapshot);
   let coordinator: MatchCoordinator;
   if (saved !== null && saved.seat === link.seat) {
     coordinator = MatchCoordinator.resume(saved, link, { persist });
@@ -129,6 +156,7 @@ function play(link: Link, snapshotKey: string | null): void {
 
   const table = new Table();
   let picked: CardId | null = null;
+  let connection: TransportStatus = 'open'; // play pauses while the link is down
   let error = '';
   let shown: GameState | null = null; // the last state drawn, to derive effect cues
   let lastCues: string[] = []; // for the dev automation hook
@@ -146,7 +174,7 @@ function play(link: Link, snapshotKey: string | null): void {
 
   const currentPrompt = (): Prompt | null => {
     const state = coordinator.state;
-    if (state === null || coordinator.status === 'over') return null;
+    if (state === null || coordinator.status === 'over' || connection !== 'open') return null;
     return promptFor(state, coordinator.seat, coordinator.legalActions(), picked);
   };
 
@@ -226,7 +254,7 @@ function play(link: Link, snapshotKey: string | null): void {
     const chain = counterChain(state, steps);
     table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights, chain }, cues);
 
-    status.textContent = statusText(prompt) + (error ? ` (${error})` : '');
+    status.textContent = (connection === 'open' || coordinator.status === 'over' ? statusText(prompt) : connectionText()) + (error ? ` (${error})` : '');
     const addButton = (label: string, onClick: () => void, quiet = false): void => {
       const button = document.createElement('button');
       button.textContent = label;
@@ -236,7 +264,7 @@ function play(link: Link, snapshotKey: string | null): void {
     };
     if (prompt !== null && 'buttons' in prompt) for (const choice of prompt.buttons) addButton(choice.label, () => submit(choice.action));
     if (prompt?.kind === 'declare') addButton('Cancel', () => ((picked = null), render()), true);
-    if (coordinator.status === 'playing') addButton('Resign', () => confirm('Resign this match?') && submit({ type: 'resign' }), true);
+    if (coordinator.status === 'playing' && connection === 'open') addButton('Resign', () => confirm('Resign this match?') && submit({ type: 'resign' }), true);
     if (coordinator.status === 'over') {
       if (snapshotKey !== null) saveSnapshot(snapshotKey, null);
       addButton('New match', () => location.reload());
@@ -252,9 +280,39 @@ function play(link: Link, snapshotKey: string | null): void {
     return prompt?.text ?? '';
   }
 
-  link.onStatus((status) => {
-    if (status === 'closed' && coordinator.status !== 'over') $('prompt').textContent = 'The connection closed.';
-  });
+  // Connection: an online link that drops is replaced by a fresh code swap.
+  let stopRelink: (() => void) | null = null;
+  const connectionText = (): string => {
+    if (connection === 'disconnected') return 'The connection is interrupted; waiting for it to recover…';
+    if (!online) return 'The other tab closed. Reload both tabs to carry on.';
+    if (coordinator.log.length === 0) return 'The connection dropped while shuffling. Start a new match.';
+    return 'The connection dropped. Swap new codes to carry on.';
+  };
+  const onStatus = (status: TransportStatus): void => {
+    connection = status;
+    const relink = online && status === 'closed' && coordinator.status !== 'over' && coordinator.log.length > 0;
+    ($('reconnect') as HTMLElement).hidden = !relink;
+    if (relink && stopRelink === null) {
+      const id = matchId(coordinator.log)!;
+      stopRelink = relinkPanel($('reconnect-panel'), { match: id, seat: coordinator.seat }, (fresh) => {
+        stopRelink = null;
+        ($('reconnect') as HTMLElement).hidden = true;
+        attach(fresh);
+        coordinator.reconnect(fresh);
+        onStatus('open');
+      });
+    }
+    render();
+  };
+  /** Listen to `next` instead of the current link (which is closed if still open). */
+  let unhook: Array<() => void> = [];
+  const attach = (next: Link): void => {
+    for (const off of unhook) off();
+    const previous = link;
+    link = next;
+    unhook = [next.onStatus(onStatus), next.onPresence(onPresence)];
+    if (previous !== next) previous.close();
+  };
   // Presence: cosmetic, best effort, never touches the coordinator.
   let peerHover: Presence | null = null;
   const showPeerHover = (): void => {
@@ -284,7 +342,7 @@ function play(link: Link, snapshotKey: string | null): void {
     const state = coordinator.state;
     table.setPeerDrag(state === null || peerDragging === null ? null : peerDrag(state, table.handOrder(other(coordinator.seat)), peerDragging));
   };
-  link.onPresence((message) => {
+  function onPresence(message: Presence): void {
     if (typeof message !== 'object' || message === null) return;
     if (message.t === 'cursor') table.setPeerCursor(peerCursor(message));
     else if (message.t === 'hoverHand' || message.t === 'hoverBoard') {
@@ -294,7 +352,8 @@ function play(link: Link, snapshotKey: string | null): void {
       peerDragging = message.t === 'dragEnd' ? null : message;
       showPeerDrag();
     }
-  });
+  }
+  attach(link);
 
   coordinator.onChange(() => {
     render();
@@ -324,6 +383,8 @@ function play(link: Link, snapshotKey: string | null): void {
       playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
       peerPresence: () => table.peerPresence(),
       settling: () => table.settling(),
+      /** Simulate the network dropping (this end closes; the peer sees its channels close). */
+      dropLink: () => link.close(),
       cardAt: (id: CardId) => {
         const at = table.cardPosition(id);
         const canvas = $('table').getBoundingClientRect();

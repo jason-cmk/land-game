@@ -121,6 +121,22 @@ button.quiet {
   overflow: hidden;
 }
 
+#reconnect {
+  position: absolute;
+  z-index: 1;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid #355a43;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 50%);
+}
+
 #table canvas {
   display: block;
   touch-action: none; /* cards drag; the page must not scroll or zoom under them */

@@ -9,6 +9,13 @@
     <main id="lobby">
       <h1>Land Game</h1>
 
+      <section id="resume" hidden>
+        <h2>Your online match is still going</h2>
+        <p class="hint" id="resume-caption"></p>
+        <div id="resume-panel"></div>
+        <button id="abandon" type="button" class="quiet">Abandon it</button>
+      </section>
+
       <section>
         <h2>Two tabs on this computer</h2>
         <form id="tabs-form">
@@ -45,7 +52,12 @@
         <span id="prompt" role="status"></span>
         <div id="buttons"></div>
       </header>
-      <div id="table"></div>
+      <div id="table">
+        <section id="reconnect" hidden>
+          <h2>The connection dropped</h2>
+          <div id="reconnect-panel"></div>
+        </section>
+      </div>
     </section>
 
     <script type="module" src="/src/board/main.ts"></script>

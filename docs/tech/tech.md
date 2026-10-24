@@ -290,7 +290,7 @@ interface Transport<Message> {
 }
 
 interface PeerTransport<Message, Presence> extends Transport<Message> {
-  readonly seat: 0 | 1;                                           // 0 inviter, 1 joiner
+  readonly seat: 0 | 1;                                           // fresh match: 0 inviter, 1 joiner; reconnect: as before
   sendPresence(presence: Presence): void;                         // best effort
   onPresence(listener: (presence: Presence) => void): () => void;
   onStatus(listener: (status: 'open' | 'disconnected' | 'closed') => void): () => void;
@@ -302,9 +302,9 @@ Implementations:
 - **`createMemoryPair`** (`memory.ts`): `Transport` only, for tests. Async delivery, structured-cloned messages.
 - **`connectBroadcast(room, seat)`** (`broadcast.ts`): two tabs on one machine, same origin, over `BroadcastChannel`. Development and hotseat play. Resolves once each tab has heard the other's hello; an open tab always acknowledges a fresh hello, so a reloaded tab can rejoin. Closing a tab sends `bye`, which closes the other end.
 - **`createInvite()` / `joinInvite(code)`** (`webrtc.ts`): direct WebRTC with manual copy-paste signalling. The inviter's invite code goes to the joiner, whose reply code comes back to `invite.accept(code)`. ICE is not trickled: each side waits for gathering to finish (5 s cap) so one paste each way carries every candidate. Two pre-negotiated channels (ids 0 and 1, so no in-band channel handshake): `game` (ordered, reliable) and `presence` (`{ ordered: false, maxRetransmits: 0 }`). Payloads are JSON; anything else from the peer is dropped. `failed` or `closed` connection states close the transport; `disconnected` is reported and may recover.
-- **Signalling codes** (`signal.ts`): `LG1.` + base64url of `deflate-raw`-compressed JSON `{ type, sdp }`. Whitespace is ignored on paste; pasting the wrong kind of code gets a specific message.
+- **Signalling codes** (`signal.ts`): `LG1.` + base64url of `deflate-raw`-compressed JSON `{ type, sdp, seat?, match? }`. `seat` is the inviter's seat (offers); `match` is set only when reconnecting. Whitespace is ignored on paste; pasting the wrong kind of code gets a specific message.
 - **ICE servers:** default is one public STUN server (`stun:stun.l.google.com:19302`), configurable. STUN sees connection metadata only, never game traffic. There is no TURN relay, so strict NATs still fail.
-- **Reconnect over WebRTC** needs a fresh invite/reply exchange, then `coordinator.reconnect(newTransport)`.
+- **Reconnect over WebRTC**: a fresh invite/reply exchange with `createInvite({ reconnect: { match, seat } })` / `joinInvite(code, { reconnect })`, then `coordinator.reconnect(newTransport)`. Either player may invite: the code carries the inviter's seat and the joiner takes the other. `match` is the hash of log entry 0 (the agreed decks), which both sides hold; a code from another match, a fresh-match code, or your own code pasted back is refused with a `SignalError` before any connection is attempted.
 
 `RTCPeerConnection` is reached through small structural types, so the module typechecks without DOM types and tests inject a fake (`test/transport/fake-webrtc.ts`). Node has no WebRTC, so the real browser path is still unverified.
 
@@ -351,5 +351,5 @@ index.html
 
 ## Open questions
 
-- **Reconnect storage.** Log replay is implemented (see *Coordinator*); where the board keeps snapshots (`sessionStorage`?) and how a new WebRTC channel is re-established are still open. Snapshots contain secrets.
+- **Reconnect storage.** The board keeps each tab's snapshot in `sessionStorage` (two tabs: per room and seat; online: one key, replaced by a new match and cleared when a match ends). It survives a reload but not closing the tab. Snapshots contain secrets; `sessionStorage` keeps them per tab and per origin.
 - **Presence abuse.** Ephemeral messages are unvalidated by nature; clamp coordinates to `0..1` and `index` to `0..hand.length - 1`.

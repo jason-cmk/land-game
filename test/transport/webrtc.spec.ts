@@ -111,6 +111,51 @@ test('peer data that is not JSON text is dropped, not delivered', async () => {
   a.close();
 });
 
+test('reconnect codes carry the inviter seat and match id; mismatches are refused', async () => {
+  const match = 'abc123';
+  // Seat 1 makes the reconnect invite this time; seat 0 joins.
+  const invite = await createInvite({ ...options, reconnect: { match, seat: 1 } });
+  const join = await joinInvite(invite.code, { ...options, reconnect: { match, seat: 0 } });
+  const inviter = await invite.accept(join.code);
+  const joiner = await join.transport;
+  assert.deepEqual([inviter.seat, joiner.seat], [1, 0]);
+  inviter.close();
+
+  const other = await createInvite({ ...options, reconnect: { match, seat: 0 } });
+  await assert.rejects(joinInvite(other.code, { ...options, reconnect: { match: 'zzz', seat: 1 } }), /different match/);
+  await assert.rejects(joinInvite(other.code, options), /reconnecting a match in progress/);
+  await assert.rejects(joinInvite(other.code, { ...options, reconnect: { match, seat: 0 } }), /your own code/);
+  const fresh = await createInvite(options);
+  await assert.rejects(joinInvite(fresh.code, { ...options, reconnect: { match, seat: 1 } }), /starts a new match/);
+  // A reply from a fresh join cannot complete a reconnect invite.
+  const freshJoin = await joinInvite(fresh.code, options);
+  await assert.rejects(other.accept(freshJoin.code), /starts a new match/);
+  for (const i of [other, fresh]) i.cancel();
+});
+
+test('a match survives its link dying: fresh codes, either seat inviting, play on to the end', async () => {
+  const [a, b] = await linkedPair<Message, never>();
+  const c0 = new MatchCoordinator({ seat: 0, prime: DEFAULT_PRIME, transport: a });
+  const c1 = new MatchCoordinator({ seat: 1, prime: DEFAULT_PRIME, transport: b });
+  c0.start();
+  c1.start();
+  await until(() => c0.status === 'playing' && c1.status === 'playing');
+  await playToEnd(c0, c1, 12);
+  a.close(); // the network drops
+  const match = c0.log[0]!.hash;
+  assert.equal(match, c1.log[0]!.hash, 'both sides derive the same match id');
+  const invite = await createInvite<Message, never>({ ...options, reconnect: { match, seat: 1 } });
+  const join = await joinInvite<Message, never>(invite.code, { ...options, reconnect: { match, seat: 0 } });
+  const [n1, n0] = await Promise.all([invite.accept(join.code), join.transport]);
+  c1.reconnect(n1);
+  c0.reconnect(n0);
+  await playToEnd(c0, c1);
+  assert.equal(c0.outcome?.kind, 'win');
+  assert.deepEqual(c0.outcome, c1.outcome);
+  assert.equal(c0.log.at(-1)!.hash, c1.log.at(-1)!.hash);
+  n0.close();
+});
+
 test('two coordinators play a full match over the WebRTC transport', async () => {
   const [a, b] = await linkedPair<Message, never>();
   const c0 = new MatchCoordinator({ seat: 0, prime: DEFAULT_PRIME, transport: a });

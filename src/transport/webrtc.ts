@@ -14,7 +14,7 @@
 // RTCPeerConnection is reached through the small structural types below, so
 // the module typechecks without DOM types and tests can inject a fake.
 
-import { decodeSignal, encodeSignal } from './signal.ts';
+import { SignalError, decodeSignal, encodeSignal } from './signal.ts';
 import type { PeerTransport, TransportStatus } from './types.ts';
 
 export interface IceServer {
@@ -69,6 +69,14 @@ export interface WebRtcOptions {
   readonly gatherTimeoutMs?: number;
 }
 
+/** Linking for a match in progress, rather than a fresh one. */
+export interface Reconnect {
+  /** The match id both players hold (see the board's matchId). */
+  readonly match: string;
+  /** This player's seat in that match. */
+  readonly seat: 0 | 1;
+}
+
 export interface Invite<Message, Presence> {
   /** Give this to the other player. */
   readonly code: string;
@@ -91,17 +99,21 @@ const defaultFactory: PeerConnectionFactory = (config) => {
   return new Ctor(config);
 };
 
-/** Seat 0: make an invite code. */
-export async function createInvite<Message, Presence>(options: WebRtcOptions = {}): Promise<Invite<Message, Presence>> {
+/** Make an invite code: for a fresh match (as seat 0), or to reconnect one (in our seat). */
+export async function createInvite<Message, Presence>(options: WebRtcOptions & { readonly reconnect?: Reconnect } = {}): Promise<Invite<Message, Presence>> {
   const pc = connect(options);
-  const transport = new WebRtcTransport<Message, Presence>(0, pc);
+  const seat = options.reconnect?.seat ?? 0;
+  const match = options.reconnect?.match;
+  const transport = new WebRtcTransport<Message, Presence>(seat, pc);
   try {
     await pc.setLocalDescription(await pc.createOffer());
-    const code = await encodeSignal(await gathered(pc, options));
+    const code = await encodeSignal({ ...(await gathered(pc, options)), seat, ...(match === undefined ? {} : { match }) });
     return {
       code,
       accept: async (replyCode) => {
-        await pc.setRemoteDescription(await decodeSignal(replyCode, 'answer'));
+        const answer = await decodeSignal(replyCode, 'answer');
+        checkMatch(match, answer.match);
+        await pc.setRemoteDescription(answer);
         await transport.opened;
         return transport;
       },
@@ -113,20 +125,35 @@ export async function createInvite<Message, Presence>(options: WebRtcOptions = {
   }
 }
 
-/** Seat 1: answer an invite code with a reply code. */
-export async function joinInvite<Message, Presence>(inviteCode: string, options: WebRtcOptions = {}): Promise<Join<Message, Presence>> {
+/** Answer an invite code with a reply code, taking the seat the inviter left. */
+export async function joinInvite<Message, Presence>(inviteCode: string, options: WebRtcOptions & { readonly reconnect?: Reconnect } = {}): Promise<Join<Message, Presence>> {
   const offer = await decodeSignal(inviteCode, 'offer');
+  const match = options.reconnect?.match;
+  checkMatch(match, offer.match);
+  const seat = offer.seat === 1 ? 0 : 1;
+  if (options.reconnect !== undefined && options.reconnect.seat !== seat) {
+    // Both seats in a match differ, so an invite for our own seat is our own code.
+    throw new SignalError('that is your own code; send it to the other player');
+  }
   const pc = connect(options);
-  const transport = new WebRtcTransport<Message, Presence>(1, pc);
+  const transport = new WebRtcTransport<Message, Presence>(seat, pc);
   try {
     await pc.setRemoteDescription(offer);
     await pc.setLocalDescription(await pc.createAnswer());
-    const code = await encodeSignal(await gathered(pc, options));
+    const code = await encodeSignal({ ...(await gathered(pc, options)), ...(match === undefined ? {} : { match }) });
     return { code, transport: transport.opened.then(() => transport) };
   } catch (err) {
     transport.close();
     throw err;
   }
+}
+
+/** A code must belong to the same match we are linking: both fresh, or both the same match id. */
+function checkMatch(ours: string | undefined, theirs: string | undefined): void {
+  if (ours === theirs) return;
+  if (ours === undefined) throw new SignalError('that code is for reconnecting a match in progress; use it from that match');
+  if (theirs === undefined) throw new SignalError('that code starts a new match; to reconnect, the other player needs to use their reconnect screen');
+  throw new SignalError('that code belongs to a different match');
 }
 
 function connect(options: WebRtcOptions): PeerConnectionLike {

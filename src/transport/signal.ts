@@ -2,10 +2,17 @@
 // deflate-compressed and base64url-encoded behind a short version prefix, so a
 // player can paste it into a chat message. Whitespace is ignored on decode,
 // because chat apps like to wrap long strings.
+//
+// Codes for reconnecting a match in progress also carry the match id, and an
+// invite carries the inviter's seat, since either player may make it.
 
 export interface Signal {
   readonly type: 'offer' | 'answer';
   readonly sdp: string;
+  /** The inviter's seat (offers only); a fresh match's inviter is seat 0. */
+  readonly seat?: 0 | 1;
+  /** The match being reconnected, if any. */
+  readonly match?: string;
 }
 
 const PREFIX = 'LG1.';
@@ -18,7 +25,7 @@ export class SignalError extends Error {
 }
 
 export async function encodeSignal(signal: Signal): Promise<string> {
-  const json = new TextEncoder().encode(JSON.stringify({ type: signal.type, sdp: signal.sdp }));
+  const json = new TextEncoder().encode(JSON.stringify({ type: signal.type, sdp: signal.sdp, seat: signal.seat, match: signal.match }));
   return PREFIX + toBase64Url(await transform(json, new CompressionStream('deflate-raw')));
 }
 
@@ -33,14 +40,17 @@ export async function decodeSignal(code: string, expected: Signal['type']): Prom
   } catch {
     throw new SignalError('the code is damaged; copy it again in full');
   }
-  const { type, sdp } = (parsed ?? {}) as { type?: unknown; sdp?: unknown };
+  const { type, sdp, seat, match } = (parsed ?? {}) as { type?: unknown; sdp?: unknown; seat?: unknown; match?: unknown };
   if ((type !== 'offer' && type !== 'answer') || typeof sdp !== 'string') {
+    throw new SignalError('the code is damaged; copy it again in full');
+  }
+  if ((seat !== undefined && seat !== 0 && seat !== 1) || (match !== undefined && typeof match !== 'string')) {
     throw new SignalError('the code is damaged; copy it again in full');
   }
   if (type !== expected) {
     throw new SignalError(expected === 'answer' ? 'that is an invite code; paste the reply code instead' : 'that is a reply code; paste the invite code instead');
   }
-  return { type, sdp };
+  return { type, sdp, ...(seat === undefined ? {} : { seat }), ...(match === undefined ? {} : { match }) };
 }
 
 async function transform(bytes: Uint8Array<ArrayBuffer>, stream: CompressionStream | DecompressionStream): Promise<Uint8Array<ArrayBuffer>> {

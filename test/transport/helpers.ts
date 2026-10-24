@@ -12,12 +12,12 @@ export async function until(condition: () => boolean, timeoutMs = 5000): Promise
   }
 }
 
-/** Play deterministic pseudo-random legal moves until both coordinators finish. */
-export async function playToEnd(c0: MatchCoordinator, c1: MatchCoordinator): Promise<void> {
+/** Play deterministic pseudo-random legal moves until both coordinators finish (or `limit` actions). */
+export async function playToEnd(c0: MatchCoordinator, c1: MatchCoordinator, limit = 5000): Promise<void> {
   let seed = 1;
   const next = (): number => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32;
   await until(() => c0.status !== 'setup' && c1.status !== 'setup');
-  for (let actions = 0; actions < 5000 && (c0.status !== 'over' || c1.status !== 'over'); actions++) {
+  for (let actions = 0; actions < limit && (c0.status !== 'over' || c1.status !== 'over'); actions++) {
     const actor = [c0, c1].find((c) => c.legalActions().length > 0);
     if (actor !== undefined) {
       const options = actor.legalActions();
