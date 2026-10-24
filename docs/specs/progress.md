@@ -26,7 +26,7 @@ Working notes:
 - **Browser automation must wait for `settling()` to reach 0** before clicking, then re-read card positions: Pixi hit-tests cards where they are drawn, new hand cards make their neighbours slide, and on a phone a re-wrapping status bar resizes the table. Bring the tab to the front first (`Page.bringToFront`): headless Chrome throttles animation frames in background tabs, so a background table can look stuck.
 - **Touch is emulated over CDP** with `Emulation.setTouchEmulationEnabled` and `Input.dispatchTouchEvent`; see `tab.click`/`drag`/`longPress` in the smoke script.
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
-- **Everything on the list is done.** What's left are the open items and risks at the end, and the open design questions in `design.md`.
+- **Next on the list:** local Wi-Fi play by QR code, and single-player mode (see Not done). Beyond that, the open items and risks at the end, and the open design questions in `design.md`.
 
 ## Summary
 
@@ -85,11 +85,25 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 
 ## Not done
 
-Nothing on the current list.
+- **Local Wi-Fi play by QR code.** Two phones on the same network connect by scanning each other's screens instead of swapping the long copy-paste codes. No server: same match, coordinator and WebRTC transport underneath; only how the invite and reply travel changes. Decided 2026-10-24: QR codes rather than a typed room code (a room code needs a relay on the network, which breaks "No server"), and no STUN server in this mode.
+  - **Flow.** The inviter's lobby shows a QR of a game URL carrying the invite (`#join=…`). The joiner scans it with the phone's own camera app, which opens the game with the invite filled in and shows a reply QR (`#reply=…`). The inviter scans that the same way; the tab it opens hands the reply to the waiting tab over BroadcastChannel (same origin) and closes. No in-app camera, so no camera permission, no `getUserMedia`, and no QR decoder library (iOS Safari has no `BarcodeDetector`). The copy-paste codes stay as the fallback.
+  - **Compact codes.** Strip the SDP to what the other side needs (ICE ufrag and password, DTLS fingerprint, host candidates, setup role) and rebuild it on arrival, so the QR stays low-density and scans easily off a phone screen. Signalling stays in `src/transport/signal.ts`; QR drawing lives in `src/board/` (a small encoder, or one npm package, which only the board may use).
+  - **No STUN.** This mode passes `iceServers: []`: on one network, host candidates are enough, and nothing third-party sees the connection.
+  - **Reconnect** uses the same QR swap; reconnect codes already carry the match id and the inviter's seat.
+  - **Lobby:** a "Same Wi-Fi" option next to two tabs and online. Smoke test: two tabs passing the QR URLs to each other directly (read from the dev hook), with `iceServers: []`.
+  - *Open question:* where the page is served from. Both phones must load the game, and the camera app opens a URL, so it needs a stable address both can reach: a static host (fits "No server"; GitHub Pages on a private repo needs a paid plan) or a laptop on the network running `vite --host`.
+  - *Open question:* a fallback when the direct connection fails. Chrome hides local IPs behind `.local` (mDNS) names, and some routers and Android phones can't resolve them, so two phones on one network may fail to connect with no clear error. Possible fallbacks: STUN after all, or a relay. Wait until it fails on real devices.
+  - *To check on real devices:* that iOS and Android camera apps open the URL in the same browser as the waiting tab (in-app browsers would break the BroadcastChannel hand-off), and that the QR scans reliably at phone brightness.
+- **Single-player mode.** Play against a computer opponent in one tab.
+  - Run the bot as a real second peer: its own coordinator over `createMemoryPair` (`src/transport/memory.ts`), so the Mental Poker setup, reveals and audit run unchanged and the bot only ever knows what its seat may know. No engine or match changes expected.
+  - Bot policy picks from `legalActions` using only its own state and private hand: start simple (random legal move, with sensible counter and target choices), keep it pure and unit-tested like `controls.ts`, and add a small think delay so plays read on the board.
+  - Decide where it lives against `tech.md` § Layering (probably `src/board/` or a new `src/bot/` layer that imports engine and match), and update `test/layers.spec.ts` to match.
+  - Lobby: a "Play the computer" option; reload resumes from `sessionStorage` like a two-tab match (both seats' snapshots). Presence from the bot can be skipped or faked lightly.
+  - Tests: random full matches bot-vs-bot through real coordinators; a smoke-test phase playing a match against the bot.
 
 ## Next step
 
-Not decided. Candidates: the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and the open design questions in `design.md` (targeting arrows, real card art, turn and phase indicators).
+The two items above: single-player is in progress on the `single-player` branch; local Wi-Fi play is designed, with the hosting question still open. Other candidates: the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and the open design questions in `design.md` (targeting arrows, real card art, turn and phase indicators).
 
 ## Open items and risks
 
