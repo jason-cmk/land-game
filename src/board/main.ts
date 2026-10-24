@@ -391,9 +391,9 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, onli
   table.onPointer((x, y) => {
     if (dragging === null && throttled()) link.sendPresence({ t: 'cursor', x, y });
   });
-  table.onDragMove((id, x, y) => {
+  table.onDragMove((id, x, y, aim) => {
     const state = coordinator.state;
-    if (state !== null && throttled()) link.sendPresence(dragMessage(state, coordinator.seat, table.handOrder(coordinator.seat), id, { x, y }));
+    if (state !== null && throttled()) link.sendPresence(dragMessage(state, coordinator.seat, table.handOrder(coordinator.seat), id, { x, y }, aim));
   });
   let peerDragging: Presence | null = null;
   const showPeerDrag = (): void => {

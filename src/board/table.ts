@@ -11,7 +11,9 @@ import { CARD_H, CARD_W, drawBack, drawFace } from './art.ts';
 import type { ChainLink } from './chain.ts';
 import { chainOutcome } from './chain.ts';
 import type { Cue } from './effects.ts';
+import { actingSeat } from './controls.ts';
 import { playCues } from './fx.ts';
+import { drawAim, drawEdgeGlow } from './overlay.ts';
 import { nextHandOrder } from './presence.ts';
 import type { FxHost } from './fx.ts';
 
@@ -62,6 +64,10 @@ class CardSprite extends Container {
   private readonly glow = new Graphics();
   private readonly art: Sprite;
   private readonly marks = new Graphics();
+  /** A light streak across the face, following the mouse (see Table.step). */
+  readonly shine = new Graphics();
+  /** 0-1: how far the card has eased into its mouse-hover tilt. */
+  hover = 0;
   private readonly textures: CardTextures;
 
   constructor(id: CardId, textures: CardTextures, onTap: (id: CardId) => void, onHover: (id: CardId | null, pointerType: string) => void, onPress: (id: CardId, event: PointerEvent) => void) {
@@ -71,7 +77,13 @@ class CardSprite extends Container {
     this.art = new Sprite(textures.back);
     this.art.anchor.set(0.5);
     this.art.setSize(BASE_W, BASE_H);
-    this.addChild(this.glow, this.art, this.marks);
+    const shineMask = new Graphics().roundRect(-BASE_W / 2, -BASE_H / 2, BASE_W, BASE_H, 6).fill(0xffffff);
+    for (const [offset, width, alpha] of [[0, 30, 0.12], [0, 16, 0.18], [0, 6, 0.3]] as const) {
+      this.shine.poly([offset - width / 2 + 30, -BASE_H, offset + width / 2 + 30, -BASE_H, offset + width / 2 - 30, BASE_H, offset - width / 2 - 30, BASE_H]).fill({ color: 0xffffff, alpha });
+    }
+    this.shine.mask = shineMask;
+    this.shine.alpha = 0;
+    this.addChild(this.glow, this.art, this.shine, shineMask, this.marks);
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.on('pointertap', () => onTap(this.id));
@@ -118,6 +130,17 @@ export class Table {
   private readonly scrim = new Graphics();
   private scrimTarget = 0;
   private readonly layerLabels: Text[] = [];
+  /** Light along the side of whoever the game is waiting on; it breathes when that is us. */
+  private readonly turnGlow = new Graphics();
+  private turnPulse = false;
+  /** The targeting arrow: ours while aiming a card, or the opponent's. */
+  private readonly aim = new Graphics();
+  /** Where our aiming drag points (canvas px); null unless aiming. */
+  private aimTip: { x: number; y: number } | null = null;
+  /** The mouse over the canvas (canvas px), for click-targeting arrows and tilt. */
+  private pointer: { x: number; y: number } | null = null;
+  /** The card under the mouse, which tilts toward it. */
+  private hovered: CardId | null = null;
   private readonly animations = new Set<{ start: number; frame: (elapsedMS: number) => boolean }>();
   private shake = { until: 0, amplitude: 0, duration: 1 };
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -135,7 +158,7 @@ export class Table {
    * A press on a draggable card; it becomes a drag once the pointer travels
    * `threshold` pixels. A finger holds the card `lift` pixels above itself, so it stays in sight.
    */
-  private press: { id: CardId; x: number; y: number; dragging: boolean; threshold: number; lift: number } | null = null;
+  private press: { id: CardId; x: number; y: number; dragging: boolean; threshold: number; lift: number; aiming: boolean } | null = null;
   /** Set when the current press turned into a drag, so its tap is ignored. */
   private pressDragged = false;
   /** Set when the current press was a long press that showed card info, so its tap is ignored. */
@@ -144,9 +167,9 @@ export class Table {
   private inspecting: CardId | null = null;
   private onInspectCard: (info: { land: Land; box: { x: number; y: number; width: number; height: number } } | null) => void = () => {};
   private localDrag: { id: CardId; x: number; y: number } | null = null;
-  private peerDrag: { id: CardId; x: number; y: number; seen: number } | null = null;
+  private peerDrag: { id: CardId; x: number; y: number; seen: number; aim: boolean } | null = null;
   private onDragStartCard: (id: CardId) => void = () => {};
-  private onDragMoveCard: (id: CardId, x: number, y: number) => void = () => {};
+  private onDragMoveCard: (id: CardId, x: number, y: number, aim: boolean) => void = () => {};
   private onDropCard: (id: CardId, over: CardId | null, onTable: boolean) => void = () => {};
 
   async mount(host: HTMLElement): Promise<void> {
@@ -158,14 +181,18 @@ export class Table {
     this.scrim.zIndex = 150; // above the table's cards, below the fanned hand (z 160+)
     this.scrim.alpha = 0;
     this.layer.addChild(this.scrim);
-    this.world.addChild(this.labels, this.layer, this.fxLayer);
+    this.world.addChild(this.turnGlow, this.labels, this.layer, this.fxLayer);
+    this.aim.zIndex = 300; // over the table's cards, under a dragged one
+    this.layer.addChild(this.aim);
     this.peerCursor.visible = false;
     this.app.stage.addChild(this.world, this.peerCursor);
     // A long press shows card info; the browser must not open its own menu or callout over it.
     this.app.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     // Track the pointer on the canvas element itself, leaving Pixi's event tree to the cards.
+    this.app.canvas.addEventListener('pointerleave', () => (this.pointer = null));
     this.app.canvas.addEventListener('pointermove', (event) => {
       const box = this.app.canvas.getBoundingClientRect();
+      this.pointer = event.pointerType === 'mouse' ? this.local(event) : null;
       this.onPointerMove((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
     });
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
@@ -208,8 +235,8 @@ export class Table {
     this.onDragStartCard = handler;
   }
 
-  /** The dragged card moving, normalised to 0-1 of the table. */
-  onDragMove(handler: (id: CardId, x: number, y: number) => void): void {
+  /** The dragged card moving, normalised to 0-1 of the table; with `aim`, its targeting arrow points there instead. */
+  onDragMove(handler: (id: CardId, x: number, y: number, aim: boolean) => void): void {
     this.onDragMoveCard = handler;
   }
 
@@ -238,13 +265,13 @@ export class Table {
   }
 
   /** Move the card the opponent is dragging to a normalised position (null lets it go). */
-  setPeerDrag(drag: { card: CardId; at: { x: number; y: number } } | null): void {
+  setPeerDrag(drag: { card: CardId; at: { x: number; y: number }; aim?: boolean } | null): void {
     if (drag === null) {
       this.peerDrag = null;
       return;
     }
     const { width, height } = this.app.screen;
-    this.peerDrag = { id: drag.card, x: drag.at.x * width, y: drag.at.y * height, seen: performance.now() };
+    this.peerDrag = { id: drag.card, x: drag.at.x * width, y: drag.at.y * height, seen: performance.now(), aim: drag.aim === true };
     this.setPeerCursor(drag.at);
   }
 
@@ -415,6 +442,7 @@ export class Table {
       this.chainLayout(view, places, { width, y: rowY(2), rowH, cardW, scale });
     }
 
+    this.turnLayout(view, { width, height, rowH, sideW, scale });
     this.scrimTarget = moment ? 0.6 : 0;
     this.scrim.clear().rect(0, 0, width, height).fill(0x050b07);
 
@@ -429,7 +457,10 @@ export class Table {
           },
           (cid, pointerType) => {
             this.onHoverCard(cid);
-            if (pointerType === 'mouse') this.hoverInspect(cid);
+            if (pointerType === 'mouse') {
+              this.hovered = cid;
+              this.hoverInspect(cid);
+            }
           },
           (cid, event) => this.pointerDown(cid, event),
         );
@@ -517,7 +548,7 @@ export class Table {
     if (this.press !== null || place == null || (highlight !== 'playable' && highlight !== 'picked')) return;
     // A finger wobbles more than a mouse, and would hide the card it drags.
     const touch = event.pointerType !== 'mouse';
-    this.press = { id, ...this.local(event), dragging: false, threshold: touch ? 12 : 6, lift: touch ? -BASE_H * place.scale * 0.6 : 0 };
+    this.press = { id, ...this.local(event), dragging: false, threshold: touch ? 12 : 6, lift: touch ? -BASE_H * place.scale * 0.6 : 0, aiming: false };
     const move = (e: PointerEvent): void => {
       const press = this.press;
       if (press === null) return;
@@ -528,10 +559,14 @@ export class Table {
         this.pressDragged = true;
         this.stopInspect();
         this.onDragStartCard(press.id);
+        // A card that needs a target stays put once lifted (picked) and aims an arrow instead.
+        press.aiming = this.aimable(press.id);
       }
-      const at = { x: pointer.x, y: pointer.y + press.lift };
-      this.localDrag = { id: press.id, ...at };
-      this.onDragMoveCard(press.id, at.x / this.app.screen.width, at.y / this.app.screen.height);
+      // An aiming finger points the arrow itself; a dragged card is held above the finger.
+      const at = press.aiming ? pointer : { x: pointer.x, y: pointer.y + press.lift };
+      if (press.aiming) this.aimTip = at;
+      else this.localDrag = { id: press.id, ...at };
+      this.onDragMoveCard(press.id, at.x / this.app.screen.width, at.y / this.app.screen.height, press.aiming);
     };
     const end = (e: PointerEvent): void => {
       window.removeEventListener('pointermove', move);
@@ -540,10 +575,11 @@ export class Table {
       const press = this.press;
       this.press = null;
       this.localDrag = null;
+      this.aimTip = null;
       if (press === null || !press.dragging) return;
-      // The drop lands where the card is drawn, which for a finger is above it.
+      // The drop lands where the card is drawn (above a finger), or where the arrow points.
       const pointer = this.local(e);
-      const at = { x: pointer.x, y: pointer.y + press.lift };
+      const at = press.aiming ? pointer : { x: pointer.x, y: pointer.y + press.lift };
       const dropped = e.type === 'pointerup';
       // The hand row is the bottom fifth; dropping back there puts the card back.
       const onTable = dropped && at.y < (this.app.screen.height / 5) * 4;
@@ -564,6 +600,83 @@ export class Table {
       if (best === null || sprite.zIndex > best.zIndex) best = sprite;
     }
     return best?.id ?? null;
+  }
+
+  /** Whether `id` is our card picked for targeting, with targets lit (so it aims rather than moves). */
+  private aimable(id: CardId): boolean {
+    const highlights = this.view?.highlights;
+    return highlights?.get(id) === 'picked' && [...highlights.values()].includes('target');
+  }
+
+  /**
+   * Whose move it is, at a glance: light along the side of whoever the game is
+   * waiting on (breathing when it is us), and a turn badge left of the middle row.
+   */
+  private turnLayout(view: TableView, at: { width: number; height: number; rowH: number; sideW: number; scale: number }): void {
+    const { width, height, rowH, sideW, scale } = at;
+    const acting = actingSeat(view.state);
+    if (acting === null) this.turnGlow.clear();
+    else drawEdgeGlow(this.turnGlow, { width, height, side: acting === view.seat ? 'bottom' : 'top', depth: rowH * 0.9, colour: acting === view.seat ? 0xf4d35e : 0xff8a6b });
+    this.turnPulse = acting === view.seat;
+    const over = view.state.phase === 'over';
+    const mine = view.state.activeSeat === view.seat;
+    const lines = over ? ['Game over'] : [`Turn ${view.state.turn}`, mine ? 'Your turn' : 'Their turn'];
+    const y = rowH * 2.5;
+    const texts = lines.map((line, i) => {
+      const label = new Text({ text: line, style: { fontFamily: 'system-ui, sans-serif', fontSize: (i === 0 ? 12 : 14) * scale, fontWeight: i === 0 ? 'normal' : 'bold', fill: i === 0 ? 0xcfd8cf : over ? 0xcfd8cf : mine ? 0xf4d35e : 0xffb199 } });
+      label.anchor.set(0.5);
+      return label;
+    });
+    const lineH = 18 * scale;
+    const boxW = Math.max(...texts.map((t) => t.width)) + 20 * scale;
+    const x = Math.max(sideW / 2, boxW / 2 + 6 * scale); // centred in the side column, but never off the edge (phones)
+    const boxH = lineH * texts.length + 10 * scale;
+    const pill = new Graphics()
+      .roundRect(x - boxW / 2, y - boxH / 2, boxW, boxH, 8 * scale)
+      .fill({ color: 0x0f1d15, alpha: 0.85 })
+      .stroke({ width: 1.5, color: over ? 0x355a43 : mine ? 0xf4d35e : 0xff8a6b, alpha: 0.8 });
+    this.labels.addChild(pill);
+    texts.forEach((label, i) => {
+      label.position.set(x, y - ((texts.length - 1) * lineH) / 2 + i * lineH);
+      this.labels.addChild(label);
+    });
+  }
+
+  /** Draw the targeting arrow for this frame: ours (a drag, or a click-picked card following the mouse), else the opponent's. */
+  private drawAimNow(now: number): void {
+    const view = this.view;
+    const scale = this.cardScale();
+    const dash = -now * 0.06;
+    const restOf = (id: CardId): { x: number; y: number } | null => {
+      const place = this.cards.get(id)?.target;
+      return place == null ? null : this.rest(place);
+    };
+    const lockOn = (from: CardId, tip: { x: number; y: number }, valid: (id: CardId) => boolean): void => {
+      const origin = restOf(from);
+      if (origin === null) return void this.aim.clear();
+      const under = this.cardUnder(tip, from);
+      const target = under !== null && valid(under) ? under : null;
+      const to = target === null ? tip : (restOf(target) ?? tip);
+      const ring = target === null ? 0 : (BASE_W * (this.cards.get(target)?.target?.scale ?? scale)) * 0.62;
+      drawAim(this.aim, origin, to, { locked: target !== null, scale, ring, dash });
+    };
+    const isTarget = (id: CardId): boolean => view?.highlights.get(id) === 'target';
+    if (this.press?.aiming && this.aimTip !== null) return lockOn(this.press.id, this.aimTip, isTarget);
+    const picked = view === null ? undefined : [...view.highlights].find(([, h]) => h === 'picked')?.[0];
+    if (picked !== undefined && this.press === null && this.pointer !== null && this.aimable(picked)) return lockOn(picked, this.pointer, isTarget);
+    const peer = this.peerDrag;
+    if (peer?.aim && view !== null) {
+      // Their legal targets are not ours to know; lock onto any public card on the table.
+      const onTable = (id: CardId): boolean => view.state.players.some((p) => p.battlefield.some((s) => s.id === id) || p.graveyard.some((s) => s.id === id));
+      return lockOn(peer.id, peer, onTable);
+    }
+    this.aim.clear();
+  }
+
+  /** The table's card scale (cards in hand and on the battlefield). */
+  private cardScale(): number {
+    for (const sprite of this.cards.values()) if (sprite.target !== null) return sprite.target.scale;
+    return 1;
   }
 
   /**
@@ -682,13 +795,29 @@ export class Table {
       this.world.position.set(0, 0);
     }
     this.scrim.alpha += (this.scrimTarget - this.scrim.alpha) * t;
+    this.turnGlow.alpha = this.turnPulse ? 0.75 + 0.25 * Math.sin(now / 420) : 1;
+    this.drawAimNow(now);
     // An opponent drag that stops updating (its end lost on the unreliable channel) lets go.
     if (this.peerDrag !== null && now - this.peerDrag.seen > 600) this.peerDrag = null;
     for (const sprite of this.cards.values()) {
       const place = sprite.target;
       if (place === null) continue;
       const local = this.localDrag?.id === sprite.id ? this.localDrag : null;
-      const peer = this.peerDrag?.id === sprite.id ? this.peerDrag : null;
+      const peer = this.peerDrag?.id === sprite.id && !this.peerDrag.aim ? this.peerDrag : null; // an aiming card stays put
+      // A face under the mouse tilts toward it and catches the light; a drag or press lets go.
+      const tilting = sprite.id === this.hovered && this.pointer !== null && this.press === null && local === null;
+      sprite.hover += ((tilting ? 1 : 0) - sprite.hover) * (1 - Math.pow(0.001, deltaMS / 150));
+      if (sprite.hover > 0.01 && this.pointer !== null) {
+        const half = { x: (BASE_W * sprite.scale.x) / 2, y: (BASE_H * sprite.scale.y) / 2 };
+        const rx = Math.max(-1, Math.min(1, (this.pointer.x - sprite.x) / half.x));
+        const ry = Math.max(-1, Math.min(1, (this.pointer.y - sprite.y) / half.y));
+        sprite.skew.set(-ry * 0.045 * sprite.hover, rx * 0.045 * sprite.hover);
+        sprite.shine.x = rx * BASE_W * 0.55;
+        sprite.shine.alpha = 0.9 * sprite.hover;
+      } else if (sprite.hover <= 0.01 && sprite.shine.alpha !== 0) {
+        sprite.skew.set(0, 0);
+        sprite.shine.alpha = 0;
+      }
       sprite.zIndex = local !== null || peer !== null ? 400 : place.z + (place.highlight === 'picked' ? 200 : 0);
       if (local !== null || peer !== null) {
         // A held card follows the pointer: tightly for ours, smoothed for theirs (~20 Hz updates).
@@ -704,7 +833,7 @@ export class Table {
       const at = this.rest(place);
       sprite.x += (at.x - sprite.x) * t;
       sprite.y += (at.y - sprite.y) * t;
-      const s = sprite.scale.x + (place.scale - sprite.scale.x) * t;
+      const s = sprite.scale.x + (place.scale * (1 + 0.06 * sprite.hover) - sprite.scale.x) * t;
       sprite.scale.set(s);
       sprite.rotation += ((place.angle ?? 0) - sprite.rotation) * t;
     }

@@ -321,9 +321,16 @@ function regrowth(host: FxHost, card: CardId): void {
   host.animate((elapsed) => {
     const grown = Math.min(elapsed / growMS, 1);
     const shown = Math.max(1, Math.round(grown * samples));
-    vine.clear().moveTo(path[0]!.x, path[0]!.y);
-    for (let k = 1; k <= shown; k++) vine.lineTo(path[k]!.x, path[k]!.y);
-    vine.stroke({ width: 4, color: 0x3f9d4e, alpha: 1 }).stroke({ width: 1.5, color: 0xa6e88f, alpha: 0.9 });
+    // A stroke uses its path up, so the stem is traced once for its dark body and again for its highlight.
+    const stem = (): void => {
+      vine.moveTo(path[0]!.x, path[0]!.y);
+      for (let k = 1; k <= shown; k++) vine.lineTo(path[k]!.x, path[k]!.y);
+    };
+    vine.clear();
+    stem();
+    vine.stroke({ width: 4, color: 0x3f9d4e, alpha: 1 });
+    stem();
+    vine.stroke({ width: 1.5, color: 0xa6e88f, alpha: 0.9 });
     // A leaf every few samples as the tip passes.
     while (leaves.length < Math.floor(shown / 5)) {
       const k = (leaves.length + 1) * 5;
@@ -380,15 +387,21 @@ function discard(host: FxHost, card: CardId): void {
   host.layer.addChild(shadow);
   host.animate((elapsed) => {
     const t = Math.min(elapsed / grabMS, 1);
-    g.clear();
-    for (const { from, control } of tendrils) {
-      g.moveTo(from.x, from.y);
-      for (let k = 1; k <= 12; k++) {
-        const p = curve(from, control, at, (k / 12) * t);
-        g.lineTo(p.x, p.y);
+    // Traced once per stroke: a stroke uses its path up.
+    const trace = (): void => {
+      for (const { from, control } of tendrils) {
+        g.moveTo(from.x, from.y);
+        for (let k = 1; k <= 12; k++) {
+          const p = curve(from, control, at, (k / 12) * t);
+          g.lineTo(p.x, p.y);
+        }
       }
-    }
-    g.stroke({ width: 7, color: 0x241830, alpha: 0.85 }).stroke({ width: 2.5, color: 0x6b4a8a, alpha: 0.9 });
+    };
+    g.clear();
+    trace();
+    g.stroke({ width: 7, color: 0x241830, alpha: 0.85 });
+    trace();
+    g.stroke({ width: 2.5, color: 0x6b4a8a, alpha: 0.9 });
     shadow.alpha = 0.65 * t;
     if (t < 1) return true;
     g.destroy();

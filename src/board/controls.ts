@@ -2,6 +2,7 @@
 // actions. Pure: no DOM, no rendering, so it is unit-tested in Node. The table
 // and the chrome both read a Prompt; neither knows any rules.
 
+import { counterResponder } from '../engine/game.ts';
 import type { Action, CardId, GameState, Land, Seat } from '../engine/types.ts';
 import { other } from '../engine/types.ts';
 
@@ -122,6 +123,18 @@ function waitingText(state: GameState, seat: Seat): string {
     default:
       return state.activeSeat === other(seat) ? 'Their turn.' : 'Waiting…';
   }
+}
+
+/**
+ * Whose move the game is waiting on: the responder in a counter window, the
+ * controller choosing an effect's target, otherwise the turn's player (forced
+ * moves included). Null once the game is over.
+ */
+export function actingSeat(state: GameState): Seat | null {
+  if (state.phase === 'over') return null;
+  if (state.phase === 'respond' && state.pending !== null) return counterResponder(state.pending);
+  if (state.phase === 'target' && state.pending !== null) return state.pending.controller;
+  return state.activeSeat;
 }
 
 /** What dropping a dragged card does: play it, keep it picked for targeting, or put it back. */

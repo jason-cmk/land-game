@@ -108,3 +108,14 @@ test('dropping a dragged card: on the table plays it, on a target aims it, back 
   assert.deepEqual(dropOutcome(declare, 'p0-slot-01', null, true), { kind: 'pick' });
   assert.deepEqual(dropOutcome(declare, 'p0-slot-01', null, false), { kind: 'cancel' });
 });
+
+test('actingSeat follows whose move the game is waiting on', async () => {
+  const { actingSeat } = await import('../../src/board/controls.ts');
+  let s = createGame(0);
+  assert.equal(actingSeat(s), 0);
+  s = act(s, 0, { type: 'play', card: 'p0-slot-00', land: 'island' });
+  assert.equal(s.phase, 'respond');
+  assert.equal(actingSeat(s), 1, 'the responder decides');
+  s = act(s, 1, { type: 'resign' });
+  assert.equal(actingSeat(s), null, 'nobody once it is over');
+});

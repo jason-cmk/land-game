@@ -14,9 +14,12 @@ export type Presence =
   | { readonly t: 'hoverBoard'; readonly card: CardId | null }
   /** Normalised 0-1 in the sender's view. */
   | { readonly t: 'cursor'; readonly x: number; readonly y: number }
-  /** A card being dragged, identified like a hover; x/y as for the cursor. */
-  | { readonly t: 'dragHand'; readonly index: number; readonly x: number; readonly y: number }
-  | { readonly t: 'dragBoard'; readonly card: CardId; readonly x: number; readonly y: number }
+  /**
+   * A card being dragged, identified like a hover; x/y as for the cursor. With
+   * `aim`, the card stays put and x/y is where its targeting arrow points.
+   */
+  | { readonly t: 'dragHand'; readonly index: number; readonly x: number; readonly y: number; readonly aim?: boolean }
+  | { readonly t: 'dragBoard'; readonly card: CardId; readonly x: number; readonly y: number; readonly aim?: boolean }
   | { readonly t: 'dragEnd' };
 
 /**
@@ -76,21 +79,22 @@ export function hoveredCard(state: GameState, theirHandOrder: readonly CardId[],
 }
 
 /** What to send while the local player drags `id` to normalised `at`. */
-export function dragMessage(state: GameState, me: Seat, myHandOrder: readonly CardId[], id: CardId, at: { x: number; y: number }): Presence {
+export function dragMessage(state: GameState, me: Seat, myHandOrder: readonly CardId[], id: CardId, at: { x: number; y: number }, aim = false): Presence {
   const hover = hoverMessage(state, me, myHandOrder, id);
-  if (hover.t === 'hoverHand' && hover.index !== null) return { t: 'dragHand', index: hover.index, ...at };
-  if (hover.t === 'hoverBoard' && hover.card !== null) return { t: 'dragBoard', card: hover.card, ...at };
+  const aiming = aim ? { aim: true } : {};
+  if (hover.t === 'hoverHand' && hover.index !== null) return { t: 'dragHand', index: hover.index, ...at, ...aiming };
+  if (hover.t === 'hoverBoard' && hover.card !== null) return { t: 'dragBoard', card: hover.card, ...at, ...aiming };
   return { t: 'dragEnd' };
 }
 
 /** Which card a peer drag moves, and where to in our view; null for anything else. */
-export function peerDrag(state: GameState, theirHandOrder: readonly CardId[], message: Presence): { card: CardId; at: { x: number; y: number } } | null {
+export function peerDrag(state: GameState, theirHandOrder: readonly CardId[], message: Presence): { card: CardId; at: { x: number; y: number }; aim: boolean } | null {
   let card: CardId | null = null;
   if (message.t === 'dragHand') card = hoveredCard(state, theirHandOrder, { t: 'hoverHand', index: message.index });
   else if (message.t === 'dragBoard') card = hoveredCard(state, theirHandOrder, { t: 'hoverBoard', card: message.card });
   else return null;
   const at = peerCursor({ t: 'cursor', x: message.x, y: message.y });
-  return card === null || at === null ? null : { card, at };
+  return card === null || at === null ? null : { card, at, aim: message.aim === true };
 }
 
 /** A peer cursor in our view: clamped, and flipped because they sit opposite. */

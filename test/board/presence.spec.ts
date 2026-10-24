@@ -61,3 +61,13 @@ test('drags travel like hovers: hidden cards by index, coordinates flipped, junk
     assert.equal(peerDrag(s, theirs, bad), null);
   }
 });
+
+test('an aiming drag says so; only a literal true counts', () => {
+  const s = createGame(0);
+  const mine = ['p0-slot-00', 'p0-slot-01', 'p0-slot-02', 'p0-slot-03', 'p0-slot-04'];
+  const aiming = dragMessage(s, 0, mine, 'p0-slot-02', { x: 0.5, y: 0.2 }, true);
+  assert.deepEqual(aiming, { t: 'dragHand', index: 2, x: 0.5, y: 0.2, aim: true });
+  assert.equal(peerDrag(s, mine, aiming)?.aim, true);
+  assert.equal(peerDrag(s, mine, { t: 'dragHand', index: 2, x: 0.5, y: 0.2 })?.aim, false);
+  assert.equal(peerDrag(s, mine, { t: 'dragHand', index: 2, x: 0.5, y: 0.2, aim: 'yes' } as unknown as Presence)?.aim, false);
+});

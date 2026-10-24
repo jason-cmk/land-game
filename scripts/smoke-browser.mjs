@@ -11,6 +11,7 @@
 //
 // Usage: npm run smoke   (CHROME_PATH overrides the Chrome binary)
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -18,7 +19,18 @@ const OUT = `${ROOT}smoke-output`;
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PAGE = 'http://127.0.0.1:5199/';
+/** A port nobody is listening on, so parallel runs (other worktrees) never share a server or browser. */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const server = createServer().once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+const VITE_PORT = await freePort();
+const DEBUG_PORT = await freePort();
+const PAGE = `http://127.0.0.1:${VITE_PORT}/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(...a);
 
@@ -34,21 +46,21 @@ async function waitHttp(url, ms = 20000) {
   }
 }
 
-const vite = spawn('npx', ['vite', '--port', '5199', '--strictPort', '--host', '127.0.0.1'], { cwd: ROOT, stdio: 'ignore' });
+const vite = spawn('npx', ['vite', '--port', String(VITE_PORT), '--strictPort', '--host', '127.0.0.1'], { cwd: ROOT, stdio: 'ignore' });
 const chrome = spawn(CHROME, [
-  '--headless=new', '--remote-debugging-port=9333', `--user-data-dir=${OUT}/profile`, '--no-first-run', '--no-default-browser-check',
+  '--headless=new', `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${OUT}/profile`, '--no-first-run', '--no-default-browser-check',
   '--enable-unsafe-swiftshader', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', 'about:blank',
 ], { stdio: 'ignore' });
 
 let exitCode = 0;
+const errors = []; // console errors and exceptions from every tab, reported at the end (or on failure)
 try {
   await waitHttp(PAGE);
-  const version = await (await waitHttp('http://127.0.0.1:9333/json/version')).json();
+  const version = await (await waitHttp(`http://127.0.0.1:${DEBUG_PORT}/json/version`)).json();
   const ws = new WebSocket(version.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r));
   let nextId = 1;
   const pending = new Map();
-  const errors = [];
   ws.addEventListener('message', (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.id && pending.has(msg.id)) {
@@ -57,6 +69,9 @@ try {
       msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
     } else if (msg.method === 'Runtime.exceptionThrown') {
       errors.push(`[${msg.sessionId?.slice(0, 4)}] exception: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`);
+    } else if (msg.method === 'Runtime.consoleAPICalled' && /^\[vite\] (page reload|hot updated)/.test(String(msg.params.args[0]?.value ?? ''))) {
+      // A file change reloading a page mid-match breaks the run; say so instead of failing mysteriously.
+      errors.push(`[${msg.sessionId?.slice(0, 4)}] ${msg.params.args.map((a) => a.value ?? a.description).join(' ')}`);
     } else if (msg.method === 'Runtime.consoleAPICalled' && (msg.params.type === 'error' || msg.params.type === 'warning')) {
       errors.push(`[${msg.sessionId?.slice(0, 4)}] console.${msg.params.type}: ${msg.params.args.map((a) => a.value ?? a.description).join(' ')}`);
     }
@@ -82,6 +97,10 @@ try {
     await send('Page.navigate', { url: PAGE }, sessionId);
     const tab = {
       name,
+      /** Close the tab: every open board keeps rendering, and leftovers starve later phases' setup. */
+      async close() {
+        await send('Target.closeTarget', { targetId });
+      },
       touch: device.mobile,
       async eval(expression) {
         const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId);
@@ -166,6 +185,17 @@ try {
     }
   }
 
+  /**
+   * Wait for the shuffle to finish and play to start. Setup is pure CPU (modular
+   * exponentiation for 100 cards), so allow a minute on a busy shared machine, and log
+   * how long it took so slow can be told from stuck.
+   */
+  async function setup(tabs, tag) {
+    const start = Date.now();
+    await waitFor(tabs, (s) => s.every((x) => x?.status === 'playing'), 60000, `${tag}: both playing`);
+    log(`${tag}: setup took ${((Date.now() - start) / 1000).toFixed(1)} s`);
+  }
+
   let seed = 7;
   const rand = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32;
 
@@ -239,7 +269,7 @@ try {
   await a.eval(`document.querySelector('button[value="0"]').click()`);
   await sleep(300);
   await b.eval(`document.querySelector('button[value="1"]').click()`);
-  await waitFor([a, b], (s) => s.every((x) => x?.status === 'playing'), 15000, 'both playing');
+  await setup([a, b], 'tabs');
   for (const t of [a, b]) await t.shot(`tabs-start-${t.name}.png`);
   const clicks = await playByClicking([a, b], 600, 'tabs');
   const end = await waitFor([a, b], (s) => s.every((x) => x.status === 'over'), 20000, 'match over');
@@ -259,17 +289,23 @@ try {
   if (histories[0].length !== histories[1].length) throw new Error('the two seats tell different histories');
 
   // --- Reload mid-game (two tabs) ----------------------------------------------------
+  for (const t of [a, b]) await t.close();
   log('== reload a tab mid-game');
   const c = await openTab('r1');
   const d = await openTab('r2');
   await c.eval(`document.getElementById('room').value = 'reload'; document.querySelector('button[value="0"]').click()`);
   await sleep(300);
   await d.eval(`document.getElementById('room').value = 'reload'; document.querySelector('button[value="1"]').click()`);
-  await waitFor([c, d], (s) => s.every((x) => x?.status === 'playing'), 15000, 'reload: both playing');
+  await setup([c, d], 'reload');
   await playByClicking([c, d], 10, 'reload');
   const beforeReload = await state(d);
   await d.eval(`location.reload()`);
-  await sleep(800);
+  // Wait for the page's module to run: a click before that submits the bare form, which just reloads again.
+  await d.front();
+  for (let waited = 0; (await d.eval('document.readyState').catch(() => 'loading')) !== 'complete'; waited += 100) {
+    if (waited > 10000) throw new Error('reload: the page never finished loading');
+    await sleep(100);
+  }
   await d.eval(`document.getElementById('room').value = 'reload'; document.querySelector('button[value="1"]').click()`);
   const afterReload = await waitFor([c, d], (s) => s.every((x) => x?.status === 'playing') && s[0].head === s[1].head, 15000, 'reload: resynced');
   log('reload: log before', beforeReload.log, 'after', afterReload[1].log, 'heads equal', afterReload[0].head === afterReload[1].head);
@@ -279,6 +315,7 @@ try {
   if (reloadEnd[0].head !== reloadEnd[1].head) throw new Error('reloaded tab fell out of lockstep');
 
   // --- Online (real WebRTC between two headless tabs) ----------------------------------
+  for (const t of [c, d]) await t.close();
   log('== online (WebRTC)');
   const e = await openTab('inviter');
   const f = await openTab('joiner');
@@ -304,7 +341,7 @@ try {
   log('reply code length', reply.length);
   await e.shot('online-invite.png');
   await e.eval(`document.getElementById('reply-code').value = ${JSON.stringify(reply)}; document.getElementById('accept').click()`);
-  await waitFor([e, f], (s) => s.every((x) => x?.status === 'playing'), 20000, 'webrtc: both playing');
+  await setup([e, f], 'webrtc');
   await playByClicking([e, f], 25, 'online');
   const online = await waitFor([e, f], (s) => s[0].head === s[1].head, 10000, 'webrtc: heads converge');
   log('online: log', online.map((s) => s.log), 'heads equal', online[0].head === online[1].head);
@@ -355,13 +392,14 @@ try {
   log('reload: log', resumed[1].log, '->', afterResume[1].log, 'heads equal', afterResume[0].head === afterResume[1].head);
 
   // --- A phone (touch) against a desktop tab ------------------------------------------
+  for (const t of [e, f]) await t.close();
   log('== phone (touch) vs desktop');
   const g = await openTab('phone', PHONE);
   const h = await openTab('desk');
   await g.eval(`document.getElementById('room').value = 'phone'; document.querySelector('button[value="0"]').click()`);
   await sleep(300);
   await h.eval(`document.getElementById('room').value = 'phone'; document.querySelector('button[value="1"]').click()`);
-  await waitFor([g, h], (s) => s.every((x) => x?.status === 'playing'), 15000, 'phone: both playing');
+  await setup([g, h], 'phone');
   await g.shot('phone-start.png');
   // A long press on one of the phone's own hand cards shows what it does, and plays nothing.
   await g.front();
@@ -417,7 +455,8 @@ try {
   log('PASS');
   ws.close();
 } catch (err) {
-  console.error('FAILED:', err.message);
+  console.error('FAILED:', err.message, err.stack?.split('\n').slice(1, 4).join(' / '));
+  if (errors.length > 0) console.error(errors.join('\n'));
   exitCode = 1;
 } finally {
   chrome.kill();
