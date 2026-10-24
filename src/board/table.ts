@@ -9,6 +9,7 @@ import { other } from '../engine/types.ts';
 import { landName } from './controls.ts';
 import type { Cue } from './effects.ts';
 import { playCues } from './fx.ts';
+import { nextHandOrder } from './presence.ts';
 import type { FxHost } from './fx.ts';
 
 export type Highlight = 'none' | 'playable' | 'target' | 'picked';
@@ -28,6 +29,7 @@ const LAND_COLOURS: Record<Land, { fill: number; ink: number }> = {
   plains: { fill: 0xe8dcae, ink: 0x4a3f22 },
   swamp: { fill: 0x4b3f56, ink: 0xeee6f3 },
 };
+const PEER_COLOUR = 0x7fdcff;
 const HIGHLIGHT_COLOURS: Record<Exclude<Highlight, 'none'>, number> = { playable: 0xf4d35e, target: 0xe4572e, picked: 0xffffff };
 
 const BASE_W = 80;
@@ -40,6 +42,8 @@ interface Place {
   face: Land | null; // null draws the card back
   revealed: boolean; // a hand card the opponent can see
   highlight: Highlight;
+  /** The opponent is hovering this card. */
+  peer: boolean;
   z: number;
 }
 
@@ -52,7 +56,7 @@ class CardSprite extends Container {
   private readonly body = new Graphics();
   private readonly caption = new Text({ text: '', style: { fontFamily: 'Georgia, serif', fontSize: 13, fontWeight: 'bold', fill: 0xffffff } });
 
-  constructor(id: CardId, onTap: (id: CardId) => void) {
+  constructor(id: CardId, onTap: (id: CardId) => void, onHover: (id: CardId | null) => void) {
     super();
     this.id = id;
     this.addChild(this.body, this.caption);
@@ -60,16 +64,19 @@ class CardSprite extends Container {
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.on('pointertap', () => onTap(this.id));
+    this.on('pointerover', () => onHover(this.id));
+    this.on('pointerout', () => onHover(null));
   }
 
   /** Redraw only when what the card shows changes. */
   paint(place: Place): void {
-    const key = `${place.face}|${place.revealed}|${place.highlight}`;
+    const key = `${place.face}|${place.revealed}|${place.highlight}|${place.peer}`;
     if (key === this.drawn) return;
     this.drawn = key;
     const g = this.body.clear();
     const x = -BASE_W / 2;
     const y = -BASE_H / 2;
+    if (place.peer) g.roundRect(x - 7, y - 7, BASE_W + 14, BASE_H + 14, 12).fill({ color: PEER_COLOUR, alpha: 0.35 });
     if (place.highlight !== 'none') {
       g.roundRect(x - 4, y - 4, BASE_W + 8, BASE_H + 8, 10).fill({ color: HIGHLIGHT_COLOURS[place.highlight], alpha: 0.9 });
     }
@@ -104,6 +111,12 @@ export class Table {
   private view: TableView | null = null;
   private mounted = false;
   private onCard: (id: CardId) => void = () => {};
+  private onHoverCard: (id: CardId | null) => void = () => {};
+  private onPointerMove: (x: number, y: number) => void = () => {};
+  private handOrders: [CardId[], CardId[]] = [[], []];
+  private peerHover: CardId | null = null;
+  private readonly peerCursor = new Graphics().circle(0, 0, 9).fill({ color: PEER_COLOUR, alpha: 0.35 }).circle(0, 0, 4).fill({ color: PEER_COLOUR, alpha: 0.9 });
+  private peerCursorSeen = 0;
 
   async mount(host: HTMLElement): Promise<void> {
     await this.app.init({ resizeTo: host, background: 0x14261c, antialias: true, autoDensity: true, resolution: window.devicePixelRatio });
@@ -111,7 +124,13 @@ export class Table {
     this.mounted = true;
     this.layer.sortableChildren = true;
     this.world.addChild(this.labels, this.layer, this.fxLayer);
-    this.app.stage.addChild(this.world);
+    this.peerCursor.visible = false;
+    this.app.stage.addChild(this.world, this.peerCursor);
+    this.app.stage.eventMode = 'static';
+    this.app.stage.hitArea = this.app.screen;
+    this.app.stage.on('pointermove', (event) => {
+      this.onPointerMove(event.global.x / this.app.screen.width, event.global.y / this.app.screen.height);
+    });
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
     this.app.renderer.on('resize', () => this.layout());
     this.layout();
@@ -119,6 +138,46 @@ export class Table {
 
   onCardClick(handler: (id: CardId) => void): void {
     this.onCard = handler;
+  }
+
+  /** The local pointer entering (id) or leaving (null) a card. */
+  onCardHover(handler: (id: CardId | null) => void): void {
+    this.onHoverCard = handler;
+  }
+
+  /** The local pointer moving, normalised to 0-1 of the table. */
+  onPointer(handler: (x: number, y: number) => void): void {
+    this.onPointerMove = handler;
+  }
+
+  /** A seat's hand in the order this table shows it. */
+  handOrder(seat: Seat): readonly CardId[] {
+    return this.handOrders[seat];
+  }
+
+  /** What the opponent's presence currently shows (dev tooling). */
+  peerPresence(): { hover: CardId | null; cursor: { x: number; y: number } | null } {
+    const c = this.peerCursor;
+    return { hover: this.peerHover, cursor: c.visible && c.alpha > 0 ? { x: c.x, y: c.y } : null };
+  }
+
+  /** Mark the card the opponent is hovering (null clears). */
+  setPeerHover(id: CardId | null): void {
+    if (id === this.peerHover) return;
+    this.peerHover = id;
+    this.layout();
+  }
+
+  /** Show the opponent's pointer at a normalised position (null hides it). */
+  setPeerCursor(at: { x: number; y: number } | null): void {
+    if (at === null) {
+      this.peerCursor.visible = false;
+      return;
+    }
+    this.peerCursor.position.set(at.x * this.app.screen.width, at.y * this.app.screen.height);
+    this.peerCursor.visible = true;
+    this.peerCursor.alpha = 1;
+    this.peerCursorSeen = performance.now();
   }
 
   /** Draw `view`, then play the effects for whatever changed to get here. */
@@ -195,7 +254,7 @@ export class Table {
       const step = slots.length <= 1 ? 0 : Math.min(w + 10 * scale, (right - left - w) / (slots.length - 1));
       const start = (left + right) / 2 - (step * (slots.length - 1)) / 2;
       slots.forEach((slot, i) => {
-        places.set(slot.id, { x: start + step * i, y, scale: scale * small, face: face(slot), revealed: revealed(slot), highlight: highlight(slot.id), z: i });
+        places.set(slot.id, { x: start + step * i, y, scale: scale * small, face: face(slot), revealed: revealed(slot), highlight: highlight(slot.id), peer: false, z: i });
       });
     };
 
@@ -206,7 +265,10 @@ export class Table {
       const mine = seat === me;
       const handY = rowY(mine ? 4 : 0);
       const fieldY = rowY(mine ? 3 : 1);
-      const hand = p.hand.filter((s) => s.id !== pendingCard);
+      // Hands keep a local visual order that shuffles new cards in (see presence.ts).
+      const inHand = p.hand.filter((s) => s.id !== pendingCard);
+      this.handOrders[seat] = nextHandOrder(this.handOrders[seat], inHand.map((s) => s.id));
+      const hand = this.handOrders[seat].map((id) => inHand.find((s) => s.id === id)!);
       const handFace = (s: CardSlot): Land | null => s.land ?? (mine ? (view.privateHand.get(s.id) ?? null) : null);
       row(hand, handY, sideW, width - sideW, handFace, (s) => s.land !== null);
       row(p.battlefield, fieldY, sideW, width - sideW, (s) => s.land, () => false);
@@ -214,7 +276,7 @@ export class Table {
       row(p.graveyard, fieldY, margin, sideW - margin, (s) => s.land, () => false, 0.6);
       p.library.forEach((slot, i) => {
         const lift = Math.min(i, 12) * 0.6;
-        places.set(slot.id, { x: width - sideW / 2, y: handY - lift, scale: scale * 0.8, face: null, revealed: false, highlight: 'none', z: i });
+        places.set(slot.id, { x: width - sideW / 2, y: handY - lift, scale: scale * 0.8, face: null, revealed: false, highlight: 'none', peer: false, z: i });
       });
       // Label on the table side of the pile, so it never falls off the edge.
       this.text(`Deck ${p.library.length}`, width - sideW / 2, handY + (mine ? -1 : 1) * cardW * 0.85, scale);
@@ -231,6 +293,7 @@ export class Table {
         face: pending.land,
         revealed: false,
         highlight: highlight(pending.card),
+        peer: false,
         z: 100,
       });
       if (pending.counters > 0) this.text(`${pending.counters} counter${pending.counters === 1 ? '' : 's'}`, width / 2 + cardW * 1.1, rowY(2), scale);
@@ -239,12 +302,13 @@ export class Table {
     for (const [id, place] of places) {
       let sprite = this.cards.get(id);
       if (sprite === undefined) {
-        sprite = new CardSprite(id, (cid) => this.onCard(cid));
+        sprite = new CardSprite(id, (cid) => this.onCard(cid), (cid) => this.onHoverCard(cid));
         sprite.position.set(place.x, place.y);
         sprite.scale.set(place.scale);
         this.cards.set(id, sprite);
         this.layer.addChild(sprite);
       }
+      place.peer = id === this.peerHover;
       sprite.target = place;
       sprite.zIndex = place.z + (place.highlight === 'picked' ? 200 : 0);
       sprite.paint(place);
@@ -265,6 +329,10 @@ export class Table {
     for (const animation of this.animations) {
       if (!animation.frame(now - animation.start)) this.animations.delete(animation);
     }
+    if (this.peerCursor.visible) {
+      const idle = now - this.peerCursorSeen;
+      this.peerCursor.alpha = idle < 2000 ? 1 : Math.max(0, 1 - (idle - 2000) / 800);
+    }
     const shaking = this.shake.until - now;
     if (shaking > 0) {
       const strength = this.shake.amplitude * (shaking / this.shake.duration);
@@ -275,7 +343,9 @@ export class Table {
     for (const sprite of this.cards.values()) {
       const place = sprite.target;
       if (place === null || sprite.holdUntil > now) continue;
-      const lift = place.highlight === 'picked' ? -14 : 0;
+      // Picked cards lift; a card the opponent is touching leans toward the middle of the table.
+      const peerLift = place.peer ? (place.y < this.app.screen.height / 2 ? 12 : -12) : 0;
+      const lift = (place.highlight === 'picked' ? -14 : 0) + peerLift;
       sprite.x += (place.x - sprite.x) * t;
       sprite.y += (place.y + lift - sprite.y) * t;
       const s = sprite.scale.x + (place.scale - sprite.scale.x) * t;

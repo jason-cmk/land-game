@@ -12,11 +12,14 @@ import { createInvite, joinInvite } from '../transport/webrtc.ts';
 import type { PeerTransport } from '../transport/types.ts';
 import { promptFor } from './controls.ts';
 import { cuesBetween } from './effects.ts';
+import { hoverMessage, hoveredCard, peerCursor } from './presence.ts';
+import type { Presence } from './presence.ts';
+import { other } from '../engine/types.ts';
 import type { Prompt } from './controls.ts';
 import { Table } from './table.ts';
 import type { Highlight } from './table.ts';
 
-type Link = PeerTransport<Message, unknown>;
+type Link = PeerTransport<Message, Presence>;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -56,13 +59,13 @@ $('tabs-form').addEventListener('submit', (event) => {
   const seat = Number(submitter.value) as Seat;
   const room = ($('room') as HTMLInputElement).value.trim() || 'table';
   setLobbyMessage(`Waiting for the other tab to open seat ${seat === 0 ? 2 : 1} in room "${room}"…`);
-  void connectBroadcast<Message, unknown>(room, seat).then((link) => play(link, `land-game/snapshot/${room}/${seat}`));
+  void connectBroadcast<Message, Presence>(room, seat).then((link) => play(link, `land-game/snapshot/${room}/${seat}`));
 });
 
 $('invite').addEventListener('click', async () => {
   try {
     setLobbyMessage('Making an invite code…');
-    const invite = await createInvite<Message, unknown>();
+    const invite = await createInvite<Message, Presence>();
     showCode('Send this invite code to the other player:', invite.code);
     ($('reply-row') as HTMLElement).hidden = false;
     setLobbyMessage('Then paste their reply code below.');
@@ -83,7 +86,7 @@ $('invite').addEventListener('click', async () => {
 $('join').addEventListener('click', async () => {
   try {
     setLobbyMessage('Making a reply code…');
-    const join = await joinInvite<Message, unknown>(($('invite-code') as HTMLTextAreaElement).value);
+    const join = await joinInvite<Message, Presence>(($('invite-code') as HTMLTextAreaElement).value);
     showCode('Send this reply code back to the inviter:', join.code);
     setLobbyMessage('Waiting for them to paste it…');
     play(await join.transport, null);
@@ -221,7 +224,36 @@ function play(link: Link, snapshotKey: string | null): void {
   link.onStatus((status) => {
     if (status === 'closed' && coordinator.status !== 'over') $('prompt').textContent = 'The connection closed.';
   });
-  coordinator.onChange(render);
+  // Presence: cosmetic, best effort, never touches the coordinator.
+  let peerHover: Presence | null = null;
+  const showPeerHover = (): void => {
+    const state = coordinator.state;
+    table.setPeerHover(state === null || peerHover === null ? null : hoveredCard(state, table.handOrder(other(coordinator.seat)), peerHover));
+  };
+  table.onCardHover((id) => {
+    const state = coordinator.state;
+    if (state !== null) link.sendPresence(hoverMessage(state, coordinator.seat, table.handOrder(coordinator.seat), id));
+  });
+  let lastCursor = 0;
+  table.onPointer((x, y) => {
+    const now = performance.now();
+    if (now - lastCursor < 50) return; // ~20 Hz
+    lastCursor = now;
+    link.sendPresence({ t: 'cursor', x, y });
+  });
+  link.onPresence((message) => {
+    if (typeof message !== 'object' || message === null) return;
+    if (message.t === 'cursor') table.setPeerCursor(peerCursor(message));
+    else if (message.t === 'hoverHand' || message.t === 'hoverBoard') {
+      peerHover = message;
+      showPeerHover();
+    }
+  });
+
+  coordinator.onChange(() => {
+    render();
+    showPeerHover(); // the hovered card may have moved or gone
+  });
   void table.mount($('table')).then(render);
 
   if (import.meta.env.DEV) {
@@ -241,6 +273,12 @@ function play(link: Link, snapshotKey: string | null): void {
         return { kind: prompt?.kind ?? null, cards, buttons, cues: lastCues };
       },
       playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
+      peerPresence: () => table.peerPresence(),
+      cardAt: (id: CardId) => {
+        const at = table.cardPosition(id);
+        const canvas = $('table').getBoundingClientRect();
+        return at === null ? null : { x: canvas.left + at.x, y: canvas.top + at.y };
+      },
     };
   }
 }

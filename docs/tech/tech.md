@@ -264,15 +264,16 @@ type Message = // src/match/protocol.ts
 Ephemeral, unordered, drop-tolerant channel:
 
 ```ts
-type Ephemeral =
-  | { t: 'hoverHand'; index: number | null }          // visual index 0..handCount-1, NEVER CardId!
-  | { t: 'hoverBoard'; card: CardId | null }          // battlefield or graveyard card (already public)
-  | { t: 'dragHand'; index: number; x: number; y: number }
-  | { t: 'cursor'; x: number; y: number };
+type Presence = // src/board/presence.ts
+  | { t: 'hoverHand'; index: number | null }          // index among the sender's HIDDEN hand cards, in its visual order. Never a CardId.
+  | { t: 'hoverBoard'; card: CardId | null }          // any public card: battlefield, graveyard, the stack, revealed hand cards
+  | { t: 'cursor'; x: number; y: number };            // 0-1 in the sender's view; the receiver flips y
+// Planned with drag-to-play: { t: 'dragHand'; index: number; x: number; y: number }
 ```
 
 - **Why `hoverHand` and `dragHand` use `index` instead of `CardId`:** each player's board visually shuffles their hand whenever a card is added to it, and keeps the mapping from visual index to `CardId` local. Sending only the visual index `0 .. hand.length - 1` lets the opponent see *which physical card in your hand you are hovering or dragging* (the Hearthstone feel) without ever revealing whether you are hovering a newly drawn card or a card returned from the graveyard by Forest.
 - Coordinates are normalised 0–1 relative to the board, throttled to ~20 Hz.
+- The receiver validates everything: an out-of-range index, a hidden card named by id, or a non-finite coordinate maps to nothing.
 
 ### Transport interface
 

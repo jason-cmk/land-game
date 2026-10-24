@@ -30,6 +30,7 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
   - Plains: a golden halo around the land it reuses.
   - Win: a gold fountain and a Victory/Defeat banner.
   Effects only decorate: every card still ends where the layout puts it, so an interrupted effect can never leave the view wrong. With `prefers-reduced-motion`, effects are skipped and only the glide remains.
+- **Presence** (`src/board/presence.ts`): the card under the opponent's pointer gets a cyan glow and leans toward the middle of the table, and their pointer shows as a cyan dot (flipped to your side, fading after 2 s idle). Hands keep a local visual order that shuffles each new card in, and a hidden hand card is sent only as its index among the sender's hidden cards in that order, so the opponent sees which card you touch but never which slot it is. Known quirk: when a hand mixes revealed and hidden cards, the two views may interleave them differently, so the lifted back can sit a position away from the cursor.
 - **Where effects come from:** the engine returns states, not events, so the board compares consecutive states (`src/board/effects.ts`): each card that changed zone becomes a cue, labelled by the pending play that caused it. This keeps the engine untouched; if engine events are added later, cues can come from them instead.
 - **Placeholder art:** coloured card faces with the land name; a brown abstract card back.
 
@@ -40,6 +41,5 @@ Presence signals (hover, drag, cursor) are cosmetic. They travel on their own th
 - How hidden information is shown: what a reveal looks like, whether revealed cards stay marked.
 - Effect tuning: the counter, regrowth and discard effects are deliberately subtle in this first pass.
 - Whether WebAssembly earns a place.
-- Drag-to-play in addition to click, and the presence signals that go with it.
+- Drag-to-play in addition to click, and a `dragHand` presence signal to go with it.
 - Card and card-back visual design.
-- How presence signals look on the receiving side without being distracting.
