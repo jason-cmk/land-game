@@ -16,6 +16,7 @@ Read these before changing behaviour. The spec is the source of truth; anything 
 - `src/engine/`: pure rules engine
 - `src/match/`: hash chain log, SRA deck protocol, lockstep coordinator
 - `src/transport/`: transport interface, in-memory pair, BroadcastChannel, WebRTC
+- `src/bot/`: the computer opponent (a pure policy, and a runner driving one seat's coordinator)
 - `test/`: `node:test` specs
 - `src/board/`, `index.html`: the player board (PixiJS table, HTML chrome)
 - `demo/demo.ts`: CLI demo of a scripted match
@@ -24,9 +25,9 @@ Read these before changing behaviour. The spec is the source of truth; anything 
 
 Node 24+ (native TypeScript type stripping). Runtime dependency: PixiJS (board only). Vite for dev and build.
 
-- `npm run dev`: board at http://localhost:5173 (open two tabs to play)
+- `npm run dev`: board at http://localhost:5173 (play the computer, or open two tabs)
 - `npm run build`
 - `npm run typecheck`
 - `npm test`
 - `npm run demo`
-- `npm run smoke`: headless-Chrome play-through of the board (two tabs, reload, real WebRTC, a touch phone); needs Chrome or Chromium (`CHROME_PATH` to override)
+- `npm run smoke`: headless-Chrome play-through of the board (two tabs, reload, real WebRTC, a touch phone, the computer); needs Chrome or Chromium (`CHROME_PATH` to override)

@@ -15,7 +15,10 @@ Anything in here can change. Anything that contradicts the spec is a bug in this
 ## Layering
 
 ```
-board/       rendering, input, animation, presence      knows: match, transport
+board/       rendering, input, animation, presence      knows: bot, match, transport
+   │
+bot/         the computer opponent: a policy, and a     knows: engine, match
+             runner driving one seat's coordinator
    │
 match/       lockstep coordinator, Mental Poker crypto, action log, hashing
    │
@@ -30,6 +33,7 @@ Rules about direction:
 - `transport/` imports nothing from `engine/` or `board/`. Messages are opaque payloads to it.
 - `board/` may import everything. It is the only layer allowed to touch the DOM, canvas, WebGL or `requestAnimationFrame`.
 - `match/` may import `engine/` and `transport/`, never `board/`. Only `board/` may use npm packages (PixiJS).
+- `bot/` may import `engine/` and `match/`, never `board/` or `transport/`: it drives a `MatchCoordinator` that someone else connected, so it plays through the same protocol as a person and sees only its own seat's knowledge. `match/` never imports `bot/`.
 - `engine/` also never touches timers, the clock, randomness or BigInt: both peers must compute identical states.
 - Enforced by `test/layers.spec.ts` (part of `npm test`), a dependency-free stand-in for `dependency-cruiser`: it reads every module specifier under `src/` and scans the engine's code (comments and strings stripped) for those globals. The separate DOM-typed `tsconfig.board.json` keeps DOM types out of the other layers at compile time.
 

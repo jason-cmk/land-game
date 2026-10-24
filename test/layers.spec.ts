@@ -7,14 +7,15 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-type Layer = 'engine' | 'match' | 'transport' | 'board';
+type Layer = 'engine' | 'match' | 'transport' | 'bot' | 'board';
 
 /** The other layers each layer may import. */
 const MAY_IMPORT: Record<Layer, readonly Layer[]> = {
   engine: [],
   transport: [],
   match: ['engine', 'transport'],
-  board: ['engine', 'match', 'transport'],
+  bot: ['engine', 'match'],
+  board: ['engine', 'match', 'transport', 'bot'],
 };
 
 /** Only the board may use npm packages (PixiJS) and non-code imports (its stylesheet). */
@@ -92,6 +93,8 @@ test('the check catches each kind of violation', () => {
     ['engine/game.ts', "import { MatchCoordinator } from '../match/coordinator.ts';", /engine\/ may not import match\//],
     ['transport/webrtc.ts', "import type { GameState } from '../engine/types.ts';", /transport\/ may not import engine\//],
     ['match/log.ts', "export { Table } from '../board/table.ts';", /match\/ may not import board\//],
+    ['bot/policy.ts', "import { Table } from '../board/table.ts';", /bot\/ may not import board\//],
+    ['match/coordinator.ts', "import { runBot } from '../bot/bot.ts';", /match\/ may not import bot\//],
     ['match/sra.ts', "import { x } from 'some-package';", /may not use the package/],
     ['engine/game.ts', "const later = () => import('../board/main.ts');", /engine\/ may not import board\//],
     ['engine/game.ts', 'export const roll = () => Math.random();', /randomness/],
