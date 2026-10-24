@@ -4,7 +4,7 @@ Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last update
 
 ## Summary
 
-Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A first playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome.
+Rules engine, Mental Poker primitives and the lockstep coordinator are done and tested; WebRTC and two-tab BroadcastChannel transports are built, and two coordinators play full games over each. A playable board (PixiJS table, HTML chrome, Vite) runs full matches in two tabs and over real WebRTC, checked in headless Chrome: code-drawn card art, effect animations, live presence (hover, cursor, drag), drag-to-play, and a visible counter chain. Reconnecting a dropped online match is in progress on its own branch.
 
 | Layer | Path | Status |
 | --- | --- | --- |
@@ -43,17 +43,18 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Coordinator fix found in the browser**: an exception in an `onChange` listener was caught by the message handler and treated as the peer failing verification, so a UI bug forfeited the match. Listener errors now go to `onListenerError` (default: rethrown on a fresh task).
 - **Tests**: 109 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
+- **Smoke test reliability**: the rare lost click in `npm run smoke` was the test clicking while a neighbouring card was still gliding over its target (new cards shuffle into the hand). The board exposes `settling()` to dev tooling and the test waits for the whole table to come to rest.
 - **Tooling**: `npm run dev` (Vite), `npm run build`, `npm run typecheck` (two configs: no-DOM layers, DOM board), `npm test`, `npm run demo`, `npm run smoke` (headless-Chrome play-through of the board). Node 24 type stripping; one runtime dependency (PixiJS).
 
 ## Not done
 
 1. **Board polish**: effect tuning, Swamp reveal moment.
-2. **WebRTC reconnect UI**: a dropped online match needs a fresh invite/reply exchange, then `coordinator.reconnect()`; there is no UI for it yet.
+2. **WebRTC reconnect UI** (in progress, branch `feature/reconnect`, not yet merged): reconnect codes carry the match id and the inviter's seat so either player can make one; an in-game panel swaps fresh codes after a drop, and a reloaded tab offers to resume its online match from the lobby. Transport-level tests pass (a match survives its link dying); the browser smoke coverage for a drop and a reload is still to be written.
 3. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
 
 ## Next step
 
-Pick from the list above: the WebRTC reconnect UI is the main gap before real remote play; effect tuning and the Swamp reveal moment are polish.
+Finish the WebRTC reconnect UI (browser smoke coverage for a dropped link and a reloaded tab), then merge it. After that: effect tuning and the Swamp reveal moment.
 
 ## Open items and risks
 
