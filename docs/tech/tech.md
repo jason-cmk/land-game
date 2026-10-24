@@ -29,7 +29,9 @@ Rules about direction:
 - `engine/` imports nothing from the other three. It has no DOM access, no timers, and no BigInt crypto math — it only sees card slots that are either still hidden (`land: null`) or revealed (`land: Land`).
 - `transport/` imports nothing from `engine/` or `board/`. Messages are opaque payloads to it.
 - `board/` may import everything. It is the only layer allowed to touch the DOM, canvas, WebGL or `requestAnimationFrame`.
-- Enforce this with `dependency-cruiser` or ESLint's `import/no-restricted-paths`.
+- `match/` may import `engine/` and `transport/`, never `board/`. Only `board/` may use npm packages (PixiJS).
+- `engine/` also never touches timers, the clock, randomness or BigInt: both peers must compute identical states.
+- Enforced by `test/layers.spec.ts` (part of `npm test`), a dependency-free stand-in for `dependency-cruiser`: it reads every module specifier under `src/` and scans the engine's code (comments and strings stripped) for those globals. The separate DOM-typed `tsconfig.board.json` keeps DOM types out of the other layers at compile time.
 
 ## Engine
 

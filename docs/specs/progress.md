@@ -1,6 +1,6 @@
 # Progress
 
-Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile, card info, history and effect polish added).
+Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-24 (mobile, card info, history, effect polish and layer enforcement added).
 
 ## Picking up on another machine
 
@@ -14,7 +14,7 @@ Paused on 2026-10-24 with everything merged to `main` and pushed to `github.com/
    ```
 2. **Check it works.** All four should pass:
    - `npm run typecheck`
-   - `npm test`: 119 tests
+   - `npm test`: 122 tests
    - `npm run demo`
    - `npm run smoke`: drives the board in headless Chrome (a two-tab match, a reload, then WebRTC with a forced drop and a reload, then a phone-sized touch tab against a desktop tab). It needs Google Chrome or Chromium; the default path is the macOS one, so elsewhere set `CHROME_PATH` (e.g. `/usr/bin/chromium` on the Arch server). It uses ports 5199 and 9333 and writes screenshots to `smoke-output/` (gitignored).
 3. **Play it.** `npm run dev`, then open http://localhost:5173 in two tabs, enter the same room in both and take seat 1 and seat 2. For online play, one player clicks *Create an invite*, the other pastes it and sends back the reply code.
@@ -26,7 +26,7 @@ Working notes:
 - **Browser automation must wait for `settling()` to reach 0** before clicking, then re-read card positions: Pixi hit-tests cards where they are drawn, new hand cards make their neighbours slide, and on a phone a re-wrapping status bar resizes the table. Bring the tab to the front first (`Page.bringToFront`): headless Chrome throttles animation frames in background tabs, so a background table can look stuck.
 - **Touch is emulated over CDP** with `Emulation.setTouchEmulationEnabled` and `Input.dispatchTouchEvent`; see `tab.click`/`drag`/`longPress` in the smoke script.
 - **Board code is DOM-typed separately**: `tsconfig.board.json` covers `src/board/`; the base config keeps DOM types out of the engine, match and transport layers.
-- **The next step is below**: layer enforcement (dependency rules for the import directions).
+- **Everything on the list is done.** What's left are the open items and risks at the end, and the open design questions in `design.md`.
 
 ## Summary
 
@@ -53,6 +53,7 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Board: phones and touch (compact layout, tap, finger drag) | `src/board/table.ts`, `style.css` | Done |
 | Board: card info on hover / long press | `src/board/cardinfo.ts`, `table.ts`, `main.ts` | Done |
 | Board: history log | `src/board/history.ts`, `main.ts` | Done |
+| Layer enforcement | `test/layers.spec.ts` | Done |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -75,7 +76,8 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Card info**: a panel above a face-up card says what it does (spec wording; `cardinfo.ts`, unit-tested placement): after a 0.3 s mouse hover, or while a finger long-presses (0.45 s). A long press never plays the card. Checked in the smoke test on both the phone and the desktop tab.
 - **History log**: a 📜 button opens a panel with the match turn by turn in plain words, rebuilt from the log by replaying it through the engine and reading each step with `cuesBetween` (`history.ts`), so it survives reloads. The opponent's draws stay "a card"; the viewer's own are named from its private hand. Unit-tested on a hand-built log from both seats and on random full matches through the real coordinators (a line per play, no named opponent draws, both seats the same length, ends with the result); the smoke test checks both seats' panels after the two-tab match and that the panel fits on the phone.
 - **Effect polish**: the counter (water bolts arcing from the paying cards into the play), countered (cracks, then spinning shards), Forest (a vine growing along the card's path home) and Swamp discard (tendrils, darkening, smoke) now read as clearly as the meteor; impact flashes are additive. The Swamp reveal is a moment: the revealed hand fans out large in the middle over a darkened table, labelled for both seats, while the discard is chosen. Checked frame by frame in headless Chrome on desktop and phone, from both seats.
-- **Tests**: 119 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
+- **Layer enforcement**: `test/layers.spec.ts` (run by `npm test`) checks every import under `src/` against `tech.md` § Layering (engine and transport import only themselves, match never imports board, only board uses npm packages) and that the engine uses no timers, clock, randomness, DOM or BigInt. Dependency-free instead of dependency-cruiser; it also checks it catches each kind of violation.
+- **Tests**: 122 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Online reconnect**: reconnect codes carry the match id (hash of log entry 0) and the inviter's seat, so either player can make one and mismatched codes are refused with a clear message. A dropped link opens a code-swap panel over the table and pauses play; a reloaded tab resumes from the lobby (`sessionStorage` snapshot) or can abandon the match. Tested at the transport level (a match survives its link dying, either seat inviting) and in `npm run smoke` over real WebRTC: a forced drop, then a reload, each followed by more moves in lockstep.
 - **Smoke test reliability**: the rare lost click in `npm run smoke` was the test clicking while a neighbouring card was still gliding over its target (new cards shuffle into the hand). The board exposes `settling()` to dev tooling and the test waits for the whole table to come to rest.
@@ -83,11 +85,11 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 
 ## Not done
 
-1. **Layer enforcement**: `tech.md` asks for dependency-cruiser or ESLint rules for the import directions; currently only the separate DOM-typed `tsconfig.board.json` keeps DOM out of the other layers.
+Nothing on the current list.
 
 ## Next step
 
-- **Layer enforcement**: see *Not done* above. After that, everything in this document's scope is done; what's left are the open items below and the design questions in `design.md`.
+Not decided. Candidates: the open items and risks below (a player who never returns, the STUN server, real-device testing on iOS), and the open design questions in `design.md` (targeting arrows, real card art, turn and phase indicators).
 
 ## Open items and risks
 
