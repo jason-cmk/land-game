@@ -126,10 +126,10 @@ export class Table {
     this.world.addChild(this.labels, this.layer, this.fxLayer);
     this.peerCursor.visible = false;
     this.app.stage.addChild(this.world, this.peerCursor);
-    this.app.stage.eventMode = 'static';
-    this.app.stage.hitArea = this.app.screen;
-    this.app.stage.on('pointermove', (event) => {
-      this.onPointerMove(event.global.x / this.app.screen.width, event.global.y / this.app.screen.height);
+    // Track the pointer on the canvas element itself, leaving Pixi's event tree to the cards.
+    this.app.canvas.addEventListener('pointermove', (event) => {
+      const box = this.app.canvas.getBoundingClientRect();
+      this.onPointerMove((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
     });
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
     this.app.renderer.on('resize', () => this.layout());
