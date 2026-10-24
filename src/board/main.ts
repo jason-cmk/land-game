@@ -314,6 +314,7 @@ function play(link: Link, snapshotKey: string | null): void {
       },
       playEffects: (cues: Parameters<Table['playEffects']>[0]) => table.playEffects(cues),
       peerPresence: () => table.peerPresence(),
+      settling: () => table.settling(),
       cardAt: (id: CardId) => {
         const at = table.cardPosition(id);
         const canvas = $('table').getBoundingClientRect();

@@ -150,7 +150,12 @@ try {
       const before = s.log;
       if (useCard) {
         const card = s.cards[Math.floor(rand() * s.cards.length)];
-        await sleep(450); // let the sprite settle where the layout put it
+        // Clicks hit cards where they are drawn: wait until nothing is still gliding (a freshly
+        // shuffled-in card's neighbours slide across it) or held by an effect.
+        for (let waited = 0; (await tab.eval('window.__landGame.settling()')) > 1; waited += 50) {
+          if (waited > 4000) throw new Error(`${tag}: the table never settled`);
+          await sleep(50);
+        }
         if (s.kind === 'main' && rand() < 0.5) {
           // Drag it onto the middle of the table; the other tab should see it move.
           const middle = await tab.eval(`(() => { const r = document.getElementById('table').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);

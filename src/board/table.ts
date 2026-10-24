@@ -260,6 +260,20 @@ export class Table {
     };
   }
 
+  /**
+   * How far the furthest card still is from where it is heading, in pixels
+   * (dev tooling: clicks hit cards where they are drawn, so automation waits for 0).
+   */
+  settling(): number {
+    let furthest = 0;
+    for (const sprite of this.cards.values()) {
+      if (sprite.target === null) continue;
+      const at = this.rest(sprite.target);
+      furthest = Math.max(furthest, Math.hypot(sprite.x - at.x, sprite.y - at.y));
+    }
+    return furthest;
+  }
+
   /** Where a card is heading, in canvas CSS pixels; null if it is not on the table. */
   cardPosition(id: CardId): { x: number; y: number } | null {
     const place = this.cards.get(id)?.target;
@@ -423,6 +437,12 @@ export class Table {
     this.labels.addChild(label);
   }
 
+  /** Where a card comes to rest: picked cards lift; a card the opponent is touching leans toward the middle of the table. */
+  private rest(place: Place): { x: number; y: number } {
+    const peerLift = place.peer ? (place.y < this.app.screen.height / 2 ? 12 : -12) : 0;
+    return { x: place.x, y: place.y + (place.highlight === 'picked' ? -14 : 0) + peerLift };
+  }
+
   /** Ease every card toward its target, run effects, shake; frame-rate independent. */
   private step(deltaMS: number): void {
     const now = performance.now();
@@ -459,11 +479,9 @@ export class Table {
         continue;
       }
       if (sprite.holdUntil > now) continue;
-      // Picked cards lift; a card the opponent is touching leans toward the middle of the table.
-      const peerLift = place.peer ? (place.y < this.app.screen.height / 2 ? 12 : -12) : 0;
-      const lift = (place.highlight === 'picked' ? -14 : 0) + peerLift;
-      sprite.x += (place.x - sprite.x) * t;
-      sprite.y += (place.y + lift - sprite.y) * t;
+      const at = this.rest(place);
+      sprite.x += (at.x - sprite.x) * t;
+      sprite.y += (at.y - sprite.y) * t;
       const s = sprite.scale.x + (place.scale - sprite.scale.x) * t;
       sprite.scale.set(s);
     }
