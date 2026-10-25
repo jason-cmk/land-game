@@ -4,6 +4,7 @@
 // cards costs no more to draw than coloured rectangles did.
 
 import { Container, Graphics, Text } from 'pixi.js';
+import type { FillInput } from 'pixi.js';
 import type { Land } from '../engine/types.ts';
 import { landName } from './controls.ts';
 
@@ -63,6 +64,51 @@ function mix(a: number, b: number, t: number): number {
   return channel(16) | channel(8) | channel(0);
 }
 
+type Point = readonly [number, number];
+
+/** Points along a chain of quadratic curves: [x0, y0, then control x, y and end x, y for each curve]. */
+function along(path: readonly number[], per = 8): Point[] {
+  const points: Point[] = [[path[0]!, path[1]!]];
+  for (let i = 2; i + 3 < path.length; i += 4) {
+    const [x0, y0] = points[points.length - 1]!;
+    const [cx, cy, x1, y1] = path.slice(i, i + 4) as [number, number, number, number];
+    for (let k = 1; k <= per; k++) {
+      const t = k / per;
+      points.push([(1 - t) ** 2 * x0 + 2 * t * (1 - t) * cx + t * t * x1, (1 - t) ** 2 * y0 + 2 * t * (1 - t) * cy + t * t * y1]);
+    }
+  }
+  return points;
+}
+
+/**
+ * A brush stroke along `path` (see along), filled rather than stroked so its
+ * width can change: swelling to `width` in the middle and thin at both ends,
+ * or ('tip') full at the start and narrowing to a point, or (a number) narrowing
+ * evenly to that fraction of its width.
+ */
+function brush(g: Graphics, path: readonly number[], width: number, fill: FillInput, shape: 'swell' | 'tip' | number = 'swell'): void {
+  const points = along(path);
+  const left: number[] = [];
+  const right: number[] = [];
+  points.forEach(([x, y], i) => {
+    const t = i / (points.length - 1);
+    const w = (width / 2) * (shape === 'swell' ? Math.sin(Math.PI * t) ** 0.7 : shape === 'tip' ? (1 - t) ** 0.8 : 1 - (1 - shape) * t);
+    const [ax, ay] = points[Math.max(0, i - 1)]!;
+    const [bx, by] = points[Math.min(points.length - 1, i + 1)]!;
+    const d = Math.hypot(bx - ax, by - ay) || 1;
+    const nx = (-(by - ay) / d) * w;
+    const ny = ((bx - ax) / d) * w;
+    left.push(x + nx, y + ny);
+    right.unshift(x - nx, y - ny);
+  });
+  g.poly([...left, ...right]).fill(fill);
+}
+
+/** A straight path for brush. */
+function line(x0: number, y0: number, x1: number, y1: number): number[] {
+  return [x0, y0, (x0 + x1) / 2, (y0 + y1) / 2, x1, y1];
+}
+
 /** A deterministic random sequence, so the art comes out the same every time. */
 function seeded(seed: number): () => number {
   let a = seed >>> 0;
@@ -108,6 +154,33 @@ function limb(g: Graphics, x: number, y: number, angle: number, len: number, wid
   g.stroke({ width: Math.max(0.35, width * 0.6), color: colour, cap: 'round', alpha: 0.85 });
 }
 
+/**
+ * A bare branch in a few straight runs with a kink at each joint. It narrows
+ * as it goes, and at each joint may fork `depth` more times into a thinner
+ * kinked branch, mostly heading up.
+ */
+function kinked(g: Graphics, x: number, y: number, angle: number, len: number, width: number, depth: number, colour: number, rand: () => number): void {
+  const runs = 3;
+  for (let i = 0; i < runs; i++) {
+    const last = i === runs - 1;
+    const run = (len / runs) * (0.8 + rand() * 0.4);
+    if (i > 0) angle += (rand() - 0.5) * 0.8;
+    const nx = x + Math.cos(angle) * run;
+    const ny = y + Math.sin(angle) * run;
+    const next = last ? 0 : width * 0.72;
+    brush(g, line(x, y, nx, ny), width, colour, last ? 'tip' : next / width);
+    if (!last) g.circle(nx, ny, next / 2).fill(colour); // rounds off the kink
+    if (depth > 0 && !last && rand() < 0.8) {
+      const up = Math.cos(angle) < 0 ? 1 : -1; // turning this way heads towards the sky
+      const side = rand() < 0.75 ? up : -up;
+      kinked(g, nx, ny, angle + side * (0.5 + rand() * 0.4), len * (0.4 + rand() * 0.15), next * 0.8, depth - 1, colour, rand);
+    }
+    x = nx;
+    y = ny;
+    width = next;
+  }
+}
+
 // Full-art scenes after John Avon's Unhinged basics, reduced to flat shapes.
 const SCENES: Record<Land, (g: Graphics) => void> = {
   plains(g) {
@@ -117,26 +190,48 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     g.poly([ART.x, -2, -20, -6, -6, -4, 8, -7, 22, -4, 34, -6, 34, 3, ART.x, 3]).fill(0xd6a454);
     band(g, 2, BOTTOM, [[0, 0xe8b860], [0.4, 0xd09440], [1, 0x9a5e24]]);
     g.poly([ART.x, 3, -28, 1.5, -20, 2.5, -12, 1.2, -4, 2.4, 4, 1, 12, 2.2, 20, 1.4, 28, 2.6, 34, 1.8, 34, 4, ART.x, 4]).fill(0x7a5226);
-    g.poly([-3, 3, 3, 3, 14, BOTTOM, -10, BOTTOM]).fill({ color: 0xf6d27a, alpha: 0.3 });
-    g.moveTo(ART.x, 20).quadraticCurveTo(-10, 14, 6, 21).quadraticCurveTo(20, 27, 34, 22);
-    g.moveTo(ART.x, 31).quadraticCurveTo(-14, 25, 2, 32).quadraticCurveTo(18, 38, 34, 33);
-    g.moveTo(-20, 41).quadraticCurveTo(0, 36, 34, 42);
-    g.ellipse(14, 11, 9, 2);
-    g.stroke({ width: 0.9, color: 0x8a5422, alpha: 0.55 });
+    // Wind ripples in the sand: each a shadowed trough under a sunlit crest,
+    // smaller and finer towards the horizon. Scattered one by one, skipping
+    // any that would crowd one already placed.
+    const sand = seeded(11);
+    const placed: [number, number, number, number][] = []; // x0, x1, y, room
+    for (let tries = 0; tries < 200 && placed.length < 15; tries++) {
+      const t = 0.08 + sand() * 0.92;
+      const y = 4 + (BOTTOM - 7) * t ** 1.5;
+      const len = (12 + sand() * 10) * (0.5 + 0.7 * t);
+      const x = ART.x - len / 3 + sand() * (ART.w - len / 3);
+      const room = 1.5 + 5 * t;
+      if (placed.some(([a, b, py, r]) => x < b + 3 * r && x + len > a - 3 * r && Math.abs(y - py) < Math.max(r, room))) continue;
+      placed.push([x, x + len, y, room]);
+      const amp = (0.25 + 1.6 * t) * (0.7 + sand() * 0.5);
+      const width = 0.2 + 0.8 * t;
+      const ripple = [x, y, x + len / 4, y - amp, x + len / 2, y, x + (3 * len) / 4, y + amp, x + len, y];
+      brush(g, ripple, width, { color: 0x8a5422, alpha: 0.5 });
+      brush(g, ripple.map((v, i) => (i % 2 ? v - width * 0.9 : v + 0.6)), width * 0.6, { color: 0xffe9a8, alpha: 0.45 });
+    }
   },
   island(g) {
-    // Seen from the air: a green island in a deep blue sea, an islet on the horizon.
+    // Seen from the air: a green island in a deep blue sea.
     band(g, ART.y, -30, [[0, 0xf4f9fc], [1, 0xb5d6ec]]);
     band(g, -30, BOTTOM, [[0, 0x8cbfe3], [0.35, 0x3f86c8], [1, 0x1d4d9c]]);
-    g.ellipse(6, -27, 7, 1.2).fill(0x4d6b5a);
-    const island = [ART.x, 30, -30, 18, -24, 10, -20, 0, -12, -6, -4, -12, 6, -16, 14, -14, 22, -12, 26, -6, 22, 0, 16, 2, 12, 8, 4, 12, -2, 18, -8, 22, -14, 30, -20, 32, -28, 34, ART.x, 36];
+    // Turned nearer the horizontal, smaller and a little flattened, so it sits out in the sea under the low horizon.
+    g.save().translateTransform(4, -10).rotateTransform(0.4).scaleTransform(0.72, 0.6).translateTransform(-2, 14);
+    const island = [-37, 32, -30, 18, -24, 10, -20, 0, -12, -6, -4, -12, 6, -16, 14, -14, 22, -12, 26, -6, 22, 0, 16, 2, 12, 8, 4, 12, -2, 18, -8, 22, -14, 30, -20, 32, -28, 34, -35, 34.5];
     g.poly(island).stroke({ width: 2.5, color: 0x9fd6c8, alpha: 0.55 });
     g.poly(island).fill(0x3f7a3a);
     g.poly([-30, 28, -20, 22, -10, 16, 0, 10, 10, 6, 16, 2, 8, 10, -2, 18, -10, 26, -20, 32, -30, 34]).fill(0x2a5a2c);
     g.poly([-22, 4, -12, -4, -2, -10, 8, -14, 16, -12, 12, -6, 2, -2, -8, 4, -16, 10]).fill(0x6aa14f);
     for (const [x, y] of [[-18, 14], [-10, 8], [-4, 2], [4, -4], [10, -8], [-14, 22], [-24, 20], [2, 6]] as const) g.circle(x, y, 1.1).fill(0x3a7436);
-    for (const [x, y] of [[18, 12], [-6, 34], [10, 26], [24, 20], [-26, 41], [20, 38]] as const) g.moveTo(x, y).lineTo(x + 5, y - 0.6);
-    g.stroke({ width: 0.8, color: 0xcfe6f7, alpha: 0.5 });
+    g.restore();
+    // Whitecaps: small curling strokes, smaller towards the horizon.
+    for (const [x, y] of [
+      [-22, -25], [6, -23], [-8, -17], [18, -14], [-27, -9], [28, 12], [26, -4],
+      [-26, 29], [-8, 34], [9, 27], [23, 22], [-26, 41], [18, 39], [1, 42], [-15, 37], [27, 32],
+    ] as const) {
+      const k = 0.35 + (0.8 * (y + 30)) / 74;
+      brush(g, [x, y, x + 2.5 * k, y - 0.7 * k, x + 6 * k, y - 0.1 * k], 0.8 * k, { color: 0xe4f1fb, alpha: 0.55 });
+      brush(g, [x + 1.5 * k, y + 1 * k, x + 3.5 * k, y + 0.4 * k, x + 5 * k, y + 1 * k], 0.45 * k, { color: 0xcfe6f7, alpha: 0.4 });
+    }
   },
   swamp(g) {
     // Grey mist, a pale sun low between dead trees, still black water.
@@ -183,8 +278,9 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
       limb(g, x, y, (deg * Math.PI) / 180, len, width, 3, dark, near);
     }
     // Ripples and reflections.
-    g.moveTo(-14, 30).lineTo(-6, 30).moveTo(6, 36).lineTo(14, 36).moveTo(-20, 39).lineTo(-12, 39);
-    g.stroke({ width: 0.7, color: 0x1a181c, alpha: 0.6 });
+    for (const [x, y, len] of [[-15, 30, 9], [6, 36, 9], [-21, 39, 9], [-10, 22, 5], [9, 25, 6], [-4, 18, 3.5], [14, 42, 7]] as const) {
+      brush(g, line(x, y, x + len, y), 0.3 + (y - 14) / 30, { color: 0x1a181c, alpha: 0.55 });
+    }
   },
   mountain(g) {
     // Jagged red peaks under a red sky, dark cliffs framing a valley lake.
@@ -193,9 +289,19 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     g.poly([ART.x, 30, -26, -6, -20, -16, -14, -34, -8, -20, -2, -28, 6, -6, 12, 4, 20, -8, 28, 6, 34, 20, 34, 30]).fill(0xa9524b);
     g.poly([-14, -34, -11, -16, -6, -6, -2, -28, -8, -20]).fill(0xc0675e);
     g.poly([20, -8, 22, 4, 28, 6]).fill(0xc0675e);
-    g.moveTo(-14, -34).lineTo(-12, -27).lineTo(-13, -21).moveTo(-2, -28).lineTo(-1, -20).moveTo(20, -8).lineTo(21, -2);
-    g.moveTo(-20, -16).lineTo(-21, -10);
-    g.stroke({ width: 0.8, color: 0xf6e6ee, alpha: 0.85 });
+    // Snow: a ragged cap on each peak, streaks running down the gullies below.
+    const snow = { color: 0xf6e6ee, alpha: 0.9 };
+    g.poly([-14, -34, -16, -27.5, -14.8, -28.6, -14, -25.5, -12.8, -28, -11, -26.8]).fill(snow);
+    g.poly([-2, -28, -4.2, -23.5, -2.9, -24.3, -1.6, -21.5, -0.6, -24, 0, -22.4]).fill(snow);
+    g.poly([20, -8, 18, -4.6, 19.2, -5.2, 20.4, -3, 21.3, -5, 22, -4.2]).fill(snow);
+    g.poly([26, -30, 24.5, -26, 25.6, -26.9, 26.7, -25, 27.5, -27]).fill({ color: 0xf6e6ee, alpha: 0.6 });
+    g.poly([14, -24, 12.5, -20.6, 13.6, -21.3, 14.8, -19.8, 15.9, -21.5]).fill({ color: 0xf6e6ee, alpha: 0.6 });
+    for (const [x, y, dx, len, w] of [
+      [-14, -27, 0.6, 7, 1.1], [-12.4, -27.5, 1.4, 5, 0.8], [-15.2, -28, -1.2, 5, 0.7],
+      [-1.6, -22.5, 0.3, 5, 0.9], [-3.4, -23.6, -0.8, 3.5, 0.6], [20.4, -4, 0.4, 4, 0.8], [-20, -16, -0.6, 5, 0.7],
+    ] as const) {
+      brush(g, line(x, y, x + dx, y + len), w, snow, 'tip');
+    }
     g.poly([ART.x, -4, -26, 4, -18, 18, -10, 30, ART.x, 30]).fill(0x4f2622);
     g.poly([34, 0, 28, 10, 20, 22, 12, 30, 34, 30]).fill(0x45201d);
     for (const [x, h] of [[-11, 3], [-8.5, 4.5], [-6, 2.5], [-3, 5], [0, 3.5], [2, 2], [4.5, 4], [7, 3], [9.5, 5], [12, 2.5]] as const) {
@@ -211,16 +317,27 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     glow(g, 0, 24, 34, 10, 0xf6f8c8, 0.7);
     for (const [x, w] of [[-20, 4], [9, 4.5]] as const) g.rect(x, ART.y, w, 80).fill(0x3d5e2a);
     band(g, 28, BOTTOM, [[0, 0xc9c45a], [1, 0x6a6a20]]);
-    for (let x = ART.x + 1; x < 34; x += 2.2) {
+    for (let x = ART.x + 1; x < 34; x += 1.6) {
       const h = 3 + ((x * 7) % 4);
-      g.moveTo(x, 30 + ((x * 3) % 5)).lineTo(x + 0.8, 26 + ((x * 3) % 5) - h);
+      const base = 30 + ((x * 3) % 5);
+      const lean = ((x * 5) % 3) - 1;
+      brush(g, [x, base, x + lean * 0.3, base - h * 0.6, x + lean, base - h - 4], 0.8, { color: 0xe4dc7a, alpha: 0.8 }, 'tip');
     }
-    g.stroke({ width: 0.7, color: 0xe4dc7a, alpha: 0.8 });
     for (const [x, w] of [[-34, 6], [25, 6], [-5, 5]] as const) g.rect(x, ART.y, w, ART.h).fill(0x1f3318);
-    g.moveTo(-28, -4).quadraticCurveTo(-22, -10, -14, -12).moveTo(25, -14).quadraticCurveTo(18, -18, 12, -26);
-    g.moveTo(0, 6).quadraticCurveTo(6, 2, 10, -4).moveTo(-5, -20).lineTo(-12, -28).moveTo(31, 10).lineTo(34, 6);
-    g.moveTo(-26, 36).quadraticCurveTo(-16, 30, -8, 38).moveTo(4, 40).quadraticCurveTo(14, 32, 22, 40);
-    g.stroke({ width: 0.9, color: 0x1f3318, cap: 'round' });
+    // Bare side branches, thick where they leave the trunk, and roots spreading from its foot.
+    const bark = 0x1f3318;
+    // Each starts inside its trunk, so the join has no gap.
+    const twigs = seeded(5);
+    for (const [x0, y0, x1, y1] of [
+      [-29.5, -4, -10, -16], [-29.5, -22, -18, -30], [-3.5, -20, -15, -32],
+      [-1.5, 6, 14, -7], [26.5, -14, 8, -28], [29.5, 10, 37, 4],
+    ] as const) {
+      kinked(g, x0, y0, Math.atan2(y1 - y0, x1 - x0), Math.hypot(x1 - x0, y1 - y0), 0.95, 2, bark, twigs);
+    }
+    // Roots flare out of the foot of each trunk.
+    for (const root of [[-29.5, 33, -26, 39, -20, 44], [26.5, 34, 22, 40, 16, 44], [-1.5, 34, 3, 40, 8, 44], [-3.5, 35, -8, 40, -12, 44], [29.5, 35, 33, 40, 35, 43]]) {
+      brush(g, root, 2.6, bark, 'tip');
+    }
     for (const [x, y] of [[4, 8], [6, 12], [8, 9], [5, 15], [9, 14], [7, 18], [3, 12], [10, 17]] as const) g.circle(x, y, 0.6).fill(0xf2e05a);
   },
 };
