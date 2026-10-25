@@ -1,6 +1,6 @@
 # Progress
 
-Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-25 (full-art land faces, HTTPS dev mode, How to play in the lobby).
+Status of the web Land Game against `spec.md` and `../tech/tech.md`. Last updated: 2026-10-25 (full-art land faces, HTTPS dev mode, How to play in the lobby, TURN relay, no unstyled flash).
 
 ## Picking up on another machine
 
@@ -67,6 +67,7 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 | Board: full-art land faces | `src/board/art.ts` | Done |
 | Board: How to play in the lobby | `index.html`, `src/board/main.ts` | Done |
 | Tooling: HTTPS dev mode for room codes off localhost | `vite.config.ts` | Done |
+| Board: optional TURN relay for every link | `src/board/ice.ts` | Done |
 | Design doc | `docs/design/design.md` | First pass |
 
 ## Done
@@ -99,6 +100,8 @@ Rules engine, Mental Poker primitives and the lockstep coordinator are done and 
 - **Full-art land faces**: each face is now one tall scene after John Avon's Unhinged basics (an island from the air, red peaks, a misty swamp, a green-lit forest, a sunset plain), still flat shapes drawn in code, inside a land-coloured rule and a flecked brown frame, with the name bar over the art and a small mana symbol bottom right.
 - **HTTPS dev mode**: room codes need `crypto.subtle` (Trystero encrypts with it), which browsers give only `https://` pages and `localhost`, so on `http://<LAN or public IP>` rooms failed silently. `npm run dev:https` serves with a self-signed certificate (`@vitejs/plugin-basic-ssl`, on only when `HTTPS` is set); the lobby now says so on an insecure page instead of failing.
 - **How to play**: a folding section at the top of the lobby, open on a first visit only (`localStorage`), with each land's effect taken from the card info wording.
+- **TURN relay**: `src/board/ice.ts` adds a TURN server to every link the board makes (room codes, Trystero's own connection, copy-paste codes, reconnects) when the build sets `VITE_TURN_URLS`, `VITE_TURN_USERNAME` and `VITE_TURN_CREDENTIAL` (in `.env.local`, gitignored); without them nothing changes. Browsers still try direct paths first. The relay sees only DTLS ciphertext and the matching code still catches a man in the middle, so it stays untrusted. On the Arch server it is coturn in Docker (`~/src/coturn_docker/`, outside the repo since it holds the login; host networking; router forwards 3478 TCP+UDP and 49160-49200 UDP to 192.168.1.205), capped at 20 allocations and 200 KB/s each, and refusing to relay into private addresses. Firefox on a phone on mobile data, which never linked before, connects with it.
+- **No unstyled flash**: `index.html` links the stylesheet in its head instead of `main.ts` importing it, so the dev server no longer shows bare HTML while the script loads.
 - **Tests**: 143 passing (`npm test`): the above plus coordinator setup, random full games in lockstep, every failure-policy branch, reconnect (reload, lost in-flight action, live transport swap, drop mid-audit), signalling codes, and full matches over the fake-WebRTC and BroadcastChannel transports.
 - **Demo**: `npm run demo` plays a scripted 13-turn match through two peer states, asserting lockstep hash equality on every action, then runs an SRA epilogue.
 - **Online reconnect**: reconnect codes carry the match id (hash of log entry 0) and the inviter's seat, so either player can make one and mismatched codes are refused with a clear message. A dropped link opens a code-swap panel over the table and pauses play; a reloaded tab resumes from the lobby (`sessionStorage` snapshot) or can abandon the match. Tested at the transport level (a match survives its link dying, either seat inviting) and in `npm run smoke` over real WebRTC: a forced drop, then a reload, each followed by more moves in lockstep.
@@ -128,5 +131,6 @@ Not decided. Candidates: merging or dropping `matching-corner` (see the top), pl
 - The lobby's copy-paste codes are long; pasting them on a phone works in emulation, but sharing them from a phone (e.g. via a chat app) is untested.
 - Room codes depend on public Nostr relays run by strangers: they can be slow (10 to 11 s to link in testing), go away, or drop Trystero's traffic. The copy-paste codes stay as the fallback. Which Trystero strategy (Nostr, MQTT, BitTorrent trackers), or several at once, is still open.
 - A relay operator who knew a room code could sit between the players and read their hands; the four-character code is a weak password (about 920,000 codes). The matching code catches this only if players compare it. Reconnect rooms use the match id, so they are not exposed this way.
-- Room codes work in Chrome and Brave but reportedly not in Firefox (2026-10-25, not yet diagnosed). First tries across networks (a phone on mobile data) in progress.
-- Open question (from planning): a fallback when the direct link fails although both players are in the room (strict NATs, `.local` addresses that will not resolve). Trystero's own connection would fail the same way, so the likely fix is a TURN server (it relays only DTLS-encrypted traffic, so it can stay untrusted). Wait until it fails for real.
+- Firefox and Chrome on one phone, on mobile data, never linked without TURN: each browser hides its local address behind an mDNS `.local` name that only the other browser can resolve on a real LAN, and the carrier NAT would not loop the phone back to itself. Chrome tab to Chrome tab works because one browser resolves its own names. Firefox itself is fine (desktop Firefox joined a Chrome room). With the TURN relay it links. Two different phones both on mobile data are still untested.
+- Room codes need the two players' clocks to agree: Trystero subscribes to relay events `since` its own now, so a peer whose clock is N minutes fast misses the other's announcements for about N minutes, and some relays reject its events as from the future. The Arch server's clock had drifted 6 minutes with NTP off (now on); phones are normally synced.
+- The TURN login ships inside the page, so anyone who reads it can use the relay; the caps above bound the cost. Short-lived credentials would need something to mint them, which a static site does not have. The relay has no TLS (`turns:`), so networks that allow only port 443 still fail.
