@@ -2,7 +2,6 @@
 // or copy-paste codes), the status bar, and the wiring from the coordinator to
 // the prompt and the table.
 
-import './style.css';
 import { MatchCoordinator } from '../match/coordinator.ts';
 import type { Snapshot } from '../match/coordinator.ts';
 import type { Message } from '../match/protocol.ts';
