@@ -10,6 +10,7 @@ import type { Message } from '../match/protocol.ts';
 import type { Snapshot } from '../match/coordinator.ts';
 import type { PeerTransport } from '../transport/types.ts';
 import { createInvite, joinInvite } from '../transport/webrtc.ts';
+import { ICE } from './ice.ts';
 import type { Invite, Reconnect } from '../transport/webrtc.ts';
 import type { Presence } from './presence.ts';
 import { pageCourier } from './courier.ts';
@@ -69,7 +70,7 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
     const fallback = el('details');
     fallback.append(el('summary', { textContent: 'Not reconnecting? Swap codes instead' }), ...manual);
     host.append(auto, message, fallback);
-    room = linkByRoom(courier, matchRoom(reconnect.match), reconnect.seat === 0 ? 'inviter' : 'joiner', { reconnect });
+    room = linkByRoom(courier, matchRoom(reconnect.match), reconnect.seat === 0 ? 'inviter' : 'joiner', { ...ICE, reconnect });
     room.link.then((link) => {
       invite?.cancel(); // a half-made code swap is not needed now
       finish(link);
@@ -95,7 +96,7 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
     try {
       invite?.cancel();
       say('Making a code…');
-      invite = await createInvite<Message, Presence>({ reconnect });
+      invite = await createInvite<Message, Presence>({ ...ICE, reconnect });
       show('Send this reconnect code to the other player:', invite.code);
       replyRow.hidden = false;
       say('Then paste their reply code below.');
@@ -116,7 +117,7 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
   use.onclick = async () => {
     try {
       say('Making a reply code…');
-      const join = await joinInvite<Message, Presence>(theirs.value, { reconnect });
+      const join = await joinInvite<Message, Presence>(theirs.value, { ...ICE, reconnect });
       invite?.cancel();
       replyRow.hidden = true;
       show('Send this reply code back:', join.code);

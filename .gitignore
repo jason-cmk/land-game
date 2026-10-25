@@ -3,3 +3,4 @@ node_modules/
 dist/
 smoke-output/
 .claude/worktrees/
+.env.local

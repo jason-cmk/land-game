@@ -3,14 +3,14 @@
 // BroadcastChannel stand-in that links tabs in one browser without the internet.
 
 import { joinRoom } from 'trystero/nostr';
-import { DEFAULT_ICE_SERVERS } from '../transport/webrtc.ts';
+import { ICE_SERVERS } from './ice.ts';
 import type { Courier, CourierRoom } from './rooms.ts';
 
 const APP_ID = 'land-game.jason-cmk';
 
 /** Trystero meets peers through public Nostr relays, encrypting what it posts there with the password. */
 export const trysteroCourier: Courier = (id, password) => {
-  const iceServers = DEFAULT_ICE_SERVERS.map((server) => ({ urls: server.urls as string | string[] }));
+  const iceServers = ICE_SERVERS.map((server) => ({ ...server, urls: server.urls as string | string[] }));
   const room = joinRoom({ appId: APP_ID, password, rtcConfig: { iceServers } }, id);
   const action = room.makeAction<string>('codes');
   const handle: CourierRoom = {

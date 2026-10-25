@@ -11,6 +11,7 @@ import { runBot } from '../bot/bot.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
 import { createMemoryPair, localPeer } from '../transport/memory.ts';
 import { WebRtcTransport, createInvite, joinInvite } from '../transport/webrtc.ts';
+import { ICE } from './ice.ts';
 import { matchId, relinkPanel } from './relink.ts';
 import { pageCourier } from './courier.ts';
 import { freshRoom, linkByRoom, matchingCode, newRoomCode, parseRoomCode } from './rooms.ts';
@@ -104,7 +105,7 @@ if (courier === null) {
 function meet(code: string, role: 'inviter' | 'joiner'): void {
   if (courier === null) return;
   roomAttempt?.cancel();
-  const attempt = linkByRoom(courier, freshRoom(code), role);
+  const attempt = linkByRoom(courier, freshRoom(code), role, ICE);
   roomAttempt = attempt;
   // Finding each other through the relays can take a while; say so rather than look stuck.
   const slow = setTimeout(() => {
@@ -155,7 +156,7 @@ $('join-room-form').addEventListener('submit', (event) => {
 $('invite').addEventListener('click', async () => {
   try {
     setLobbyMessage('Making an invite code…');
-    const invite = await createInvite<Message, Presence>();
+    const invite = await createInvite<Message, Presence>(ICE);
     showCode('Send this invite code to the other player:', invite.code);
     ($('reply-row') as HTMLElement).hidden = false;
     setLobbyMessage('Then paste their reply code below.');
@@ -176,7 +177,7 @@ $('invite').addEventListener('click', async () => {
 $('join').addEventListener('click', async () => {
   try {
     setLobbyMessage('Making a reply code…');
-    const join = await joinInvite<Message, Presence>(($('invite-code') as HTMLTextAreaElement).value);
+    const join = await joinInvite<Message, Presence>(($('invite-code') as HTMLTextAreaElement).value, ICE);
     showCode('Send this reply code back to the inviter:', join.code);
     setLobbyMessage('Waiting for them to paste it…');
     startOnline(await join.transport);

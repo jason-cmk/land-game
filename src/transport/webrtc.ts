@@ -19,12 +19,15 @@ import type { PeerTransport, TransportStatus } from './types.ts';
 
 export interface IceServer {
   readonly urls: string | readonly string[];
+  readonly username?: string;
+  readonly credential?: string;
 }
 
 /**
  * Public STUN lets peers behind ordinary home NATs find their public address.
- * It sees only connection metadata, never game traffic. There is no TURN
- * relay, so matches across strict NATs fail (see spec: NAT failures).
+ * It sees only connection metadata, never game traffic. With no TURN relay,
+ * matches across strict NATs fail (see spec: NAT failures); callers can pass
+ * one in `iceServers` (the board does, when its build names one).
  */
 export const DEFAULT_ICE_SERVERS: readonly IceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
