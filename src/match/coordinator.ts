@@ -252,6 +252,12 @@ export class MatchCoordinator {
     };
   }
 
+  /** Stop listening, leaving the transport open for whatever uses it next (a rematch). */
+  detach(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+
   close(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -296,6 +302,8 @@ export class MatchCoordinator {
         return this.onAudit(message.ownDeck, message.otherDeck);
       case 'bye':
         return this.end({ kind: 'void', detail: `peer ended the match (${message.reason}): ${message.detail}` }, false);
+      case 'rematch':
+        return; // about the next match, not this one (the peer may finish its audit first)
       default:
         throw new ProtocolError(`unknown message type ${(message as { t?: unknown }).t}`);
     }

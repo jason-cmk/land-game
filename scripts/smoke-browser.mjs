@@ -225,7 +225,7 @@ try {
       }
       const tab = tabs[i];
       const s = states[i];
-      const buttons = s.buttons.filter((b) => b !== 'Resign' && b !== 'Cancel' && b !== 'New match');
+      const buttons = s.buttons.filter((b) => !['Resign', 'Cancel', 'Rematch', 'Accept rematch', 'Back to lobby'].includes(b));
       const useCard = s.cards.length > 0 && (buttons.length === 0 || rand() < 0.8);
       const before = s.log;
       let attempt = '';
@@ -527,7 +527,7 @@ try {
   if (soloEnd[0].outcome?.kind !== 'win' || botMoves === 0) throw new Error('match against the computer did not finish with a win');
 
   log('== against the computer: reload mid-game');
-  await solo.eval(`[...document.querySelectorAll('#buttons button')].find((b) => b.textContent === 'New match').click()`);
+  await solo.eval(`[...document.querySelectorAll('#buttons button')].find((b) => b.textContent === 'Back to lobby').click()`);
   await poll(solo, `document.readyState === 'complete' && document.getElementById('computer')?.textContent === 'Play the computer'`, 'computer: a finished match is not offered again');
   await solo.eval(`document.getElementById('computer').click()`);
   await setup([solo], 'computer, second match');

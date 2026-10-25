@@ -11,6 +11,7 @@ import type { Message } from '../../src/match/protocol.ts';
 import { verifyChain, stateHashOf } from '../../src/match/log.ts';
 import { DEFAULT_PRIME, generatePrime } from '../../src/match/sra.ts';
 import type { RandomBytes } from '../../src/match/sra.ts';
+import { rematch } from '../../src/match/rematch.ts';
 import { createMemoryPair } from '../../src/transport/memory.ts';
 import type { Transport } from '../../src/transport/types.ts';
 import { IllegalActionError } from '../../src/engine/types.ts';
@@ -351,4 +352,50 @@ test('setup cannot be resumed', async () => {
   const [t0] = createMemoryPair<Message>();
   const c = new MatchCoordinator({ seat: 0, prime: PRIME, transport: t0 });
   assert.throws(() => c.reconnect(t0), /setup cannot be resumed/);
+});
+
+// ---------------------------------------------------------------------------
+// Rematch
+// ---------------------------------------------------------------------------
+
+/** Finish a match by resignation, then offer a rematch on each seat's transport. */
+async function finishedWithRematch(seed: number) {
+  const match = await startMatch(seed);
+  match.coordinators.find((c) => c.legalActions().length > 0)!.submit({ type: 'resign' });
+  await settle();
+  const next: [MatchCoordinator | null, MatchCoordinator | null] = [null, null];
+  const offers = ([0, 1] as const).map((seat) =>
+    rematch(match.transports[seat], () => {
+      match.coordinators[seat].detach();
+      next[seat] = new MatchCoordinator({ seat, prime: PRIME, transport: match.transports[seat], rand: seededRandomBytes(seed * 10 + seat + 2) });
+      next[seat].start();
+    }),
+  );
+  return { match, next, offers };
+}
+
+test('a rematch starts once both players ask, over the same link', async () => {
+  const { match, next, offers } = await finishedWithRematch(4);
+  offers[0]!.request();
+  await settle();
+  assert.deepEqual(next, [null, null], 'one request alone starts nothing');
+  assert.ok(offers[1]!.peerAsked);
+  offers[1]!.request();
+  await settle();
+  const fresh = next as [MatchCoordinator, MatchCoordinator];
+  assert.ok(fresh.every((c) => c?.status === 'playing'));
+  assertLockstep(fresh);
+  assert.notEqual(fresh[0].log[0]!.hash, match.coordinators[0].log[0]!.hash, 'a new shuffle');
+  assert.deepEqual(match.coordinators[0].outcome, match.coordinators[1].outcome, 'the finished match is untouched');
+  await playRandomly(fresh, mulberry32(4));
+  assert.equal(fresh[0].outcome?.kind, 'win');
+});
+
+test('a rematch asked by both at once starts one match each side', async () => {
+  const { next, offers } = await finishedWithRematch(5);
+  offers[0]!.request();
+  offers[1]!.request();
+  offers[1]!.request(); // a second click sends nothing more
+  await settle();
+  assertLockstep(next as [MatchCoordinator, MatchCoordinator]);
 });

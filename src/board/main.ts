@@ -5,6 +5,8 @@
 import { MatchCoordinator } from '../match/coordinator.ts';
 import type { Snapshot } from '../match/coordinator.ts';
 import type { Message } from '../match/protocol.ts';
+import { rematch } from '../match/rematch.ts';
+import type { Rematch } from '../match/rematch.ts';
 import { DEFAULT_PRIME } from '../match/sra.ts';
 import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
 import { runBot } from '../bot/bot.ts';
@@ -236,9 +238,15 @@ function playComputer(saved: readonly [Snapshot | null, Snapshot | null]): void 
     if (bot.status === 'over') saveSnapshot(COMPUTER_KEYS[1], null);
     else if (snapshot !== null) persist(snapshot);
   });
-  const table = play(localPeer(mine, 0), COMPUTER_KEYS[0], saved[0], 'computer');
+  const again = (): void => {
+    stopBot();
+    bot.detach();
+    for (const key of COMPUTER_KEYS) saveSnapshot(key, null);
+    playComputer([null, null]);
+  };
+  const table = play(localPeer(mine, 0), COMPUTER_KEYS[0], saved[0], 'computer', again);
   // Wait for cards to come to rest, so each move can be seen landing before the next.
-  runBot(bot, { busy: () => table.settling() > 1 });
+  const stopBot = runBot(bot, { busy: () => table.settling() > 1 });
 }
 
 {
@@ -284,9 +292,11 @@ $('copy-code').addEventListener('click', () => {
 
 /**
  * Play a match over `link`, resuming `saved` if it is this seat's. Online
- * matches offer a code swap when the link drops; two tabs just reload.
+ * matches offer a code swap when the link drops; two tabs just reload. When
+ * it ends, Rematch runs `again` (the computer), or else starts a new match
+ * over the same link once both players ask.
  */
-function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode: Mode): Table {
+function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode: Mode, again?: () => void): Table {
   roomAttempt?.cancel(); // a room still searching must not start a second match
   const online = mode === 'online';
   $('lobby').hidden = true;
@@ -310,6 +320,12 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
   }
 
   const table = new Table();
+  // Page-wide listeners this match adds, removed when a rematch replaces it.
+  const cleanup: Array<() => void> = [];
+  const onKey = (listener: (event: KeyboardEvent) => void): void => {
+    document.addEventListener('keydown', listener);
+    cleanup.push(() => document.removeEventListener('keydown', listener));
+  };
   let picked: CardId | null = null;
   let connection: TransportStatus = 'open'; // play pauses while the link is down
   let error = '';
@@ -367,7 +383,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
   };
   historyToggle.onclick = () => setHistoryOpen(historyPanel.hidden);
   $('history-close').onclick = () => setHistoryOpen(false);
-  document.addEventListener('keydown', (event) => {
+  onKey((event) => {
     if (event.key === 'Escape' && !historyPanel.hidden) setHistoryOpen(false);
   });
   function renderHistory(toEnd = false): void {
@@ -472,7 +488,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     table.show({ state, seat: coordinator.seat, privateHand: coordinator.privateHand, highlights, chain }, cues);
     renderHistory();
 
-    setRichText(status, (connection === 'open' || coordinator.status === 'over' ? statusText(prompt) : connectionText()) + (error ? ` (${error})` : ''));
+    setRichText(status, (connection === 'open' || coordinator.status === 'over' ? statusText(prompt) : connectionText()) + rematchText() + (error ? ` (${error})` : ''));
     const addButton = (label: string, onClick: () => void, quiet = false, into = buttons): void => {
       const button = document.createElement('button');
       button.append(...richText(label));
@@ -499,7 +515,9 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     if (coordinator.status === 'playing' && connection === 'open') addButton('Resign', () => confirm('Resign this match?') && submit({ type: 'resign' }), true);
     if (coordinator.status === 'over') {
       if (snapshotKey !== null) saveSnapshot(snapshotKey, null);
-      addButton('New match', () => location.reload());
+      if (again !== undefined) addButton('Rematch', () => (teardown(), again()));
+      else if (offer !== null && !offer.asked && connection === 'open') addButton(offer.peerAsked ? 'Accept rematch' : 'Rematch', () => offer!.request());
+      addButton('Back to lobby', () => location.reload(), true);
     }
   }
 
@@ -510,6 +528,13 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     if (outcome?.kind === 'win') return promptFor(coordinator.state!, coordinator.seat, []).text;
     if (coordinator.status === 'auditing') return 'Game over. Checking both decks…';
     return prompt?.text ?? '';
+  }
+
+  function rematchText(): string {
+    if (coordinator.status !== 'over' || offer === null) return '';
+    if (connection === 'closed') return ' The other player has left.';
+    if (offer.asked) return ' Waiting for the other player to accept the rematch…';
+    return offer.peerAsked ? ' They want a rematch.' : '';
   }
 
   // Connection: an online link that drops is replaced by a fresh code swap.
@@ -544,16 +569,19 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     matching.setAttribute('aria-expanded', String(open));
   };
   matching.onclick = () => showMatching(matchingInfo.hidden);
-  document.addEventListener('keydown', (event) => {
+  onKey((event) => {
     if (event.key === 'Escape') showMatching(false);
   });
   /** Listen to `next` instead of the current link (which is closed if still open). */
   let unhook: Array<() => void> = [];
+  let offer: Rematch | null = null;
   const attach = (next: Link): void => {
     for (const off of unhook) off();
+    offer?.dispose();
     const previous = link;
     link = next;
     unhook = [next.onStatus(onStatus), next.onPresence(onPresence)];
+    offer = again === undefined ? rematch(next, () => (teardown(), play(next, snapshotKey, null, mode)), render) : null;
     if (previous !== next) previous.close();
     const session = next instanceof WebRtcTransport ? next.session : null;
     matching.hidden = session === null;
@@ -603,6 +631,15 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     }
   }
   attach(link);
+  /** Clear this match off the page, leaving the link open for the next one. */
+  function teardown(): void {
+    offer?.dispose();
+    coordinator.detach();
+    for (const off of [...unhook, ...cleanup]) off();
+    stopRelink?.();
+    $('card-info').hidden = true;
+    table.destroy();
+  }
 
   coordinator.onChange(() => {
     render();

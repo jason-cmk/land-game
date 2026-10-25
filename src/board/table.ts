@@ -199,8 +199,14 @@ export class Table {
   private onDragMoveCard: (id: CardId, x: number, y: number, aim: boolean) => void = () => {};
   private onDropCard: (id: CardId, over: CardId | null, onTable: boolean) => void = () => {};
 
+  private readonly resizes = new ResizeObserver(() => this.app.queueResize());
+  private started = false; // the Pixi app has finished init
+  private destroyed = false;
+
   async mount(host: HTMLElement): Promise<void> {
     await this.app.init({ resizeTo: host, background: 0x14261c, antialias: true, autoDensity: true, resolution: window.devicePixelRatio });
+    this.started = true;
+    if (this.destroyed) return this.app.destroy(true, { children: true }); // destroyed while starting up
     host.appendChild(this.app.canvas);
     this.textures = this.bakeTextures();
     this.mounted = true;
@@ -228,7 +234,7 @@ export class Table {
     this.app.ticker.add((ticker) => this.step(ticker.deltaMS));
     this.app.renderer.on('resize', () => this.layout());
     // resizeTo only follows the window; the host also changes size when the status bar wraps (phones).
-    new ResizeObserver(() => this.app.queueResize()).observe(host);
+    this.resizes.observe(host);
     this.layout();
   }
 
@@ -429,7 +435,9 @@ export class Table {
 
   destroy(): void {
     window.removeEventListener('pointerup', this.liftFinger);
-    this.app.destroy(true, { children: true });
+    this.resizes.disconnect();
+    this.destroyed = true;
+    if (this.started) this.app.destroy(true, { children: true }); // else mount() does it once init finishes
   }
 
   private layout(): void {

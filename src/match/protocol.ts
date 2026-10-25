@@ -50,7 +50,9 @@ export type Message =
   | { readonly t: 'resume'; readonly length: number; readonly headHash: string }
   /** End-of-game: all of the sender's per-slot keys, for its own deck and for the opponent's. */
   | { readonly t: 'audit'; readonly ownDeck: readonly string[]; readonly otherDeck: readonly string[] }
-  | { readonly t: 'bye'; readonly reason: 'void' | 'forfeit'; readonly detail: string };
+  | { readonly t: 'bye'; readonly reason: 'void' | 'forfeit'; readonly detail: string }
+  /** This player wants another match over the same link (see `rematch.ts`); the finished match ignores it. */
+  | { readonly t: 'rematch' };
 
 /** The engine view of a match action: same shape, keys removed. */
 export function toEngineAction(action: MatchAction): Action {
