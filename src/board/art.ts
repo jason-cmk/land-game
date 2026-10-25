@@ -83,16 +83,17 @@ function along(path: readonly number[], per = 8): Point[] {
 /**
  * A brush stroke along `path` (see along), filled rather than stroked so its
  * width can change: swelling to `width` in the middle and thin at both ends,
+ * ('log') the same width most of the way with short tapered ends,
  * or ('tip') full at the start and narrowing to a point, or (a number) narrowing
  * evenly to that fraction of its width.
  */
-function brush(g: Graphics, path: readonly number[], width: number, fill: FillInput, shape: 'swell' | 'tip' | number = 'swell'): void {
+function brush(g: Graphics, path: readonly number[], width: number, fill: FillInput, shape: 'swell' | 'log' | 'tip' | number = 'swell'): void {
   const points = along(path);
   const left: number[] = [];
   const right: number[] = [];
   points.forEach(([x, y], i) => {
     const t = i / (points.length - 1);
-    const w = (width / 2) * (shape === 'swell' ? Math.sin(Math.PI * t) ** 0.7 : shape === 'tip' ? (1 - t) ** 0.8 : 1 - (1 - shape) * t);
+    const w = (width / 2) * (shape === 'swell' ? Math.sin(Math.PI * t) ** 0.7 : shape === 'log' ? Math.min(1, Math.sin(Math.PI * t) * 3) : shape === 'tip' ? (1 - t) ** 0.8 : 1 - (1 - shape) * t);
     const [ax, ay] = points[Math.max(0, i - 1)]!;
     const [bx, by] = points[Math.min(points.length - 1, i + 1)]!;
     const d = Math.hypot(bx - ax, by - ay) || 1;
@@ -102,6 +103,19 @@ function brush(g: Graphics, path: readonly number[], width: number, fill: FillIn
     right.unshift(x - nx, y - ny);
   });
   g.poly([...left, ...right]).fill(fill);
+}
+
+/** A closed shape with rounded corners: a curve through the midpoints of `points`' edges. */
+function smooth(g: Graphics, points: readonly number[]): Graphics {
+  const n = points.length / 2;
+  const mid = (i: number): Point => {
+    const a = (i % n) * 2;
+    const b = ((i + 1) % n) * 2;
+    return [(points[a]! + points[b]!) / 2, (points[a + 1]! + points[b + 1]!) / 2];
+  };
+  g.moveTo(...mid(n - 1));
+  for (let i = 0; i < n; i++) g.quadraticCurveTo(points[i * 2]!, points[i * 2 + 1]!, ...mid(i));
+  return g.closePath();
 }
 
 /** A straight path for brush. */
@@ -217,20 +231,23 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     // Turned nearer the horizontal, smaller and a little flattened, so it sits out in the sea under the low horizon.
     g.save().translateTransform(4, -10).rotateTransform(0.4).scaleTransform(0.72, 0.6).translateTransform(-2, 14);
     const island = [-37, 32, -30, 18, -24, 10, -20, 0, -12, -6, -4, -12, 6, -16, 14, -14, 22, -12, 26, -6, 22, 0, 16, 2, 12, 8, 4, 12, -2, 18, -8, 22, -14, 30, -20, 32, -28, 34, -35, 34.5];
-    g.poly(island).stroke({ width: 2.5, color: 0x9fd6c8, alpha: 0.55 });
-    g.poly(island).fill(0x3f7a3a);
-    g.poly([-30, 28, -20, 22, -10, 16, 0, 10, 10, 6, 16, 2, 8, 10, -2, 18, -10, 26, -20, 32, -30, 34]).fill(0x2a5a2c);
-    g.poly([-22, 4, -12, -4, -2, -10, 8, -14, 16, -12, 12, -6, 2, -2, -8, 4, -16, 10]).fill(0x6aa14f);
+    // Shallows fading out into the deep water, then the land over a beach
+    // drawn a little lower, so the beach shows only along the near shore.
+    // (Filled copies grown about the island's middle, not wide outlines: those overlap themselves at the tips.)
+    for (let k = 1.2; k > 1.01; k -= 0.02) smooth(g, island.map((v, i) => (i % 2 ? 9 + (v - 9) * k : -5.5 + (v + 5.5) * k))).fill({ color: 0x9fe0d0, alpha: 0.06 });
+    smooth(g, island.map((v, i) => (i % 2 ? v + 1.6 : v))).fill(0xeadfa8);
+    smooth(g, island).fill(0x3f7a3a);
+    smooth(g, [-30, 28, -20, 22, -10, 16, 0, 10, 10, 6, 16, 2, 8, 10, -2, 18, -10, 26, -20, 32, -30, 33]).fill(0x2a5a2c);
+    smooth(g, [-22, 4, -12, -4, -2, -10, 8, -14, 16, -12, 12, -6, 2, -2, -8, 4, -16, 10]).fill(0x6aa14f);
     for (const [x, y] of [[-18, 14], [-10, 8], [-4, 2], [4, -4], [10, -8], [-14, 22], [-24, 20], [2, 6]] as const) g.circle(x, y, 1.1).fill(0x3a7436);
     g.restore();
-    // Whitecaps: small curling strokes, smaller towards the horizon.
-    for (const [x, y] of [
-      [-22, -25], [6, -23], [-8, -17], [18, -14], [-27, -9], [28, 12], [26, -4],
-      [-26, 29], [-8, 34], [9, 27], [23, 22], [-26, 41], [18, 39], [1, 42], [-15, 37], [27, 32],
-    ] as const) {
-      const k = 0.35 + (0.8 * (y + 30)) / 74;
-      brush(g, [x, y, x + 2.5 * k, y - 0.7 * k, x + 6 * k, y - 0.1 * k], 0.8 * k, { color: 0xe4f1fb, alpha: 0.55 });
-      brush(g, [x + 1.5 * k, y + 1 * k, x + 3.5 * k, y + 0.4 * k, x + 5 * k, y + 1 * k], 0.45 * k, { color: 0xcfe6f7, alpha: 0.4 });
+    // Whitecaps: small curling strokes of varied size, smaller towards the horizon.
+    const caps = seeded(4);
+    for (const [x, y] of [[-22, -25], [12, -21], [-6, -14], [-27, -6], [27, 15], [-25, 30], [5, 27], [22, 22], [-10, 38], [17, 39], [28, 33]] as const) {
+      const k = (0.35 + (0.8 * (y + 30)) / 74) * (0.6 + caps() * 0.8);
+      const len = 4 + caps() * 4;
+      brush(g, [x, y, x + len * 0.4 * k, y - 0.7 * k, x + len * k, y - 0.1 * k], 0.8 * k, { color: 0xe4f1fb, alpha: 0.4 + caps() * 0.25 });
+      if (caps() < 0.5) brush(g, [x + 1.5 * k, y + 1 * k, x + 3.5 * k, y + 0.4 * k, x + 5 * k, y + 1 * k], 0.45 * k, { color: 0xcfe6f7, alpha: 0.35 });
     }
   },
   swamp(g) {
@@ -277,9 +294,53 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     ] as const) {
       limb(g, x, y, (deg * Math.PI) / 180, len, width, 3, dark, near);
     }
-    // Ripples and reflections.
-    for (const [x, y, len] of [[-15, 30, 9], [6, 36, 9], [-21, 39, 9], [-10, 22, 5], [9, 25, 6], [-4, 18, 3.5], [14, 42, 7]] as const) {
-      brush(g, line(x, y, x + len, y), 0.3 + (y - 14) / 30, { color: 0x1a181c, alpha: 0.55 });
+    // Drowned trees: broken stumps poking out of the water and fallen branches
+    // floating half under it, larger nearer us, each with a faint reflection
+    // and a ripple where it meets the water.
+    const stumps = seeded(13);
+    for (const [x, y, floating] of [[-3, 17, false], [-9, 21, true], [10, 24, false], [-15, 30, false], [7, 35, true], [-22, 40, true], [16, 41, false]] as const) {
+      const near = (y - 14) / 30;
+      if (floating) {
+        // Pieces of one gently bowed branch, the gaps where it dips under; a twig or two sticking up.
+        const len = (10 + 14 * near) * (0.8 + stumps() * 0.4);
+        const tilt = (stumps() - 0.5) * 0.12 * len;
+        const w = 0.35 + 0.65 * near;
+        // Bowed, with one end lifting clear of the water.
+        const lift = stumps() < 0.5 ? (t: number) => Math.max(0, t - 0.8) : (t: number) => Math.max(0, 0.2 - t);
+        const at = (t: number): Point => [x - len / 2 + len * t, y + tilt * (t - 0.5) - Math.sin(Math.PI * t) * len * 0.04 - lift(t) * len * 0.5];
+        for (const [t0, t1] of [[0, 0.38], [0.44, 0.78], [0.84, 1]] as const) {
+          const [ax, ay] = at(t0);
+          const [bx, by] = at(t1);
+          const [mx, my] = at((t0 + t1) / 2);
+          brush(g, [ax, ay + w * 1.1, mx, my + w * 1.3, bx, by + w * 1.1], w * 0.7, { color: dark, alpha: 0.22 });
+          brush(g, [ax, ay, mx, my, bx, by], w, dark, 'log');
+        }
+        for (const t of [0.25, 0.6]) {
+          const [tx, ty] = at(t);
+          const tall = (1.8 + 3.5 * near) * (0.7 + stumps() * 0.6);
+          const ex = tx + (stumps() - 0.4) * tall * 0.7;
+          brush(g, line(tx, ty, ex, ty - tall), w * 0.55, dark, 'tip');
+          if (stumps() < 0.6) brush(g, line(tx + (ex - tx) * 0.5, ty - tall * 0.5, ex + tall * 0.35, ty - tall * 0.8), w * 0.35, dark, 'tip');
+        }
+        brush(g, line(x - len * 0.62, y + 0.4, x + len * 0.62, y + 0.4 + tilt * 0.2), 0.25 + 0.3 * near, { color: 0xb8b6bd, alpha: 0.35 });
+        continue;
+      }
+      const h = (2 + 5 * near) * (0.7 + stumps() * 0.6);
+      const w = 0.6 + 1.6 * near;
+      const lean = (stumps() - 0.5) * w;
+      const stump = (dir: 1 | -1, k: number): number[] => {
+        const top = (f: number): number => y - dir * h * k * f;
+        return [x - w / 2, y, x - w * 0.35 + lean, top(0.95), x - w * 0.05 + lean, top(0.75), x + w * 0.15 + lean, top(1), x + w * 0.4 + lean, top(0.82), x + w / 2, y];
+      };
+      g.poly(stump(-1, 0.6)).fill({ color: dark, alpha: 0.25 });
+      g.poly(stump(1, 1)).fill(dark);
+      if (stumps() < 0.5) {
+        // A snapped-off branch.
+        const side = stumps() < 0.5 ? 1 : -1;
+        const bx = x + side * w * 0.3 + lean * 0.6;
+        brush(g, line(bx, y - h * 0.55, bx + side * h * 0.45, y - h * 0.8), w * 0.45, dark, 'tip');
+      }
+      brush(g, line(x - w * 1.8, y + 0.2, x + w * 1.8, y + 0.2), 0.25 + 0.3 * near, { color: 0xb8b6bd, alpha: 0.35 });
     }
   },
   mountain(g) {
@@ -304,11 +365,23 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     }
     g.poly([ART.x, -4, -26, 4, -18, 18, -10, 30, ART.x, 30]).fill(0x4f2622);
     g.poly([34, 0, 28, 10, 20, 22, 12, 30, 34, 30]).fill(0x45201d);
-    for (const [x, h] of [[-11, 3], [-8.5, 4.5], [-6, 2.5], [-3, 5], [0, 3.5], [2, 2], [4.5, 4], [7, 3], [9.5, 5], [12, 2.5]] as const) {
-      g.poly([x - 0.8, 30, x, 30 - h, x + 0.8, 30]).fill(0x2a1210);
-    }
+    // Pines along the shore, of mixed heights, mirrored in the lake.
+    const woods = seeded(9);
+    const pines: [number, number][] = [];
+    for (let x = -13; x < 14; x += 1.3 + woods() * 1.2) pines.push([x, 2 + woods() * 4.5]);
+    const pine = (x: number, h: number, dir: 1 | -1, fill: FillInput): void => {
+      for (let j = 0; j < 3; j++) {
+        const top = 30 - dir * (h - j * h * 0.27);
+        const half = h * (0.16 + j * 0.07);
+        g.poly([x, top, x + half, top + dir * h * 0.42, x - half, top + dir * h * 0.42]).fill(fill);
+      }
+    };
     band(g, 30, BOTTOM, [[0, 0x5a2c28], [1, 0x2e1614]]);
-    g.ellipse(0, 32.5, 14, 1.3).fill({ color: 0xd98a80, alpha: 0.35 });
+    for (const [x, h] of pines) pine(x, h * 0.8, -1, { color: 0x2a1210, alpha: 0.35 });
+    for (const [x, h] of pines) pine(x, h, 1, 0x2a1210);
+    for (const [x0, x1, y, w] of [[-12, 6, 32.5, 0.9], [-4, 12, 35, 0.7], [-17, -5, 38, 0.6], [4, 15, 40.5, 0.6], [-9, 0, 42.5, 0.5]] as const) {
+      brush(g, line(x0, y, x1, y), w, { color: 0xe39a8f, alpha: 0.4 });
+    }
   },
   forest(g) {
     // Tall straight trunks fading into green light, golden grass below.
