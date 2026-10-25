@@ -63,6 +63,51 @@ function mix(a: number, b: number, t: number): number {
   return channel(16) | channel(8) | channel(0);
 }
 
+/** A deterministic random sequence, so the art comes out the same every time. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * A dead branch: it sets off at `angle` and sags under its weight, more the
+ * thinner it is. It forks `depth` more times into thinner limbs; the last
+ * ones droop into a few hanging twigs.
+ */
+function limb(g: Graphics, x: number, y: number, angle: number, len: number, width: number, depth: number, colour: number, rand: () => number): void {
+  const sag = len * (0.1 + 0.35 / (width + 0.4));
+  const cx = x + Math.cos(angle) * len * 0.6;
+  const cy = y + Math.sin(angle) * len * 0.6;
+  const ex = x + Math.cos(angle) * len;
+  const ey = y + Math.sin(angle) * len + sag;
+  g.moveTo(x, y).quadraticCurveTo(cx, cy, ex, ey).stroke({ width, color: colour, cap: 'round' });
+  const onward = Math.atan2(ey - cy, ex - cx);
+  if (depth > 0) {
+    // One fork part way along, heading up and out; the limb carries on from its tip.
+    const t = 0.45 + rand() * 0.2;
+    const fx = (1 - t) ** 2 * x + 2 * t * (1 - t) * cx + t * t * ex;
+    const fy = (1 - t) ** 2 * y + 2 * t * (1 - t) * cy + t * t * ey;
+    const side = Math.cos(angle) < 0 ? 1 : -1; // towards the sky on this limb's side
+    limb(g, fx, fy, angle + side * (0.5 + rand() * 0.4), len * (0.55 + rand() * 0.15), width * 0.62, depth - 1, colour, rand);
+    limb(g, ex, ey, onward - side * (0.2 + rand() * 0.3), len * (0.5 + rand() * 0.2), width * 0.65, depth - 1, colour, rand);
+    return;
+  }
+  // Twigs hanging from the tip and the middle of the last limbs.
+  for (const [hx, hy] of [[ex, ey], [cx * 0.5 + (x + ex) * 0.25, cy * 0.5 + (y + ey) * 0.25]] as const) {
+    for (let i = 0; i < 1 + Math.round(rand()); i++) {
+      const drop = 1.5 + rand() * 3.5;
+      const drift = (rand() - 0.5) * 3;
+      g.moveTo(hx, hy).quadraticCurveTo(hx + drift, hy + drop * 0.4, hx + drift * 0.4, hy + drop);
+    }
+  }
+  g.stroke({ width: Math.max(0.35, width * 0.6), color: colour, cap: 'round', alpha: 0.85 });
+}
+
 // Full-art scenes after John Avon's Unhinged basics, reduced to flat shapes.
 const SCENES: Record<Land, (g: Graphics) => void> = {
   plains(g) {
@@ -110,17 +155,33 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     }
     glow(g, 0, 15, 14, 3, 0xffffff, 0.7);
     // Faint trees in the mist.
-    for (const x of [-20, -7, 9, 21]) g.moveTo(x, 15).lineTo(x + 1, -30).moveTo(x + 0.6, -10).lineTo(x + 5, -17).moveTo(x + 0.8, -20).lineTo(x - 4, -26);
-    g.stroke({ width: 0.9, color: 0x8a8790, alpha: 0.8 });
+    const mist = 0x96939c;
+    const far = seeded(3);
+    for (const x of [-20, -7, 9, 21]) {
+      g.moveTo(x, 15).lineTo(x + 1, -30).stroke({ width: 0.9, color: mist });
+      limb(g, x + 0.6, -10, -0.9, 6, 0.6, 1, mist, far);
+      limb(g, x + 0.8, -20, -2.3, 6, 0.6, 1, mist, far);
+    }
     // Twisted dead trees at both sides.
     const dark = 0x1e1c21;
     g.moveTo(-29, BOTTOM).bezierCurveTo(-27, 20, -31, 0, -25, -18).bezierCurveTo(-22, -26, -28, -32, -24, -40);
     g.moveTo(26, BOTTOM).bezierCurveTo(23, 14, 27, -4, 22, -20);
     g.stroke({ width: 3, color: dark, cap: 'round' });
-    g.moveTo(-26, -10).quadraticCurveTo(-16, -14, -12, -24).moveTo(-25, -22).quadraticCurveTo(-34, -28, -32, -38);
-    g.moveTo(-13, -23).lineTo(-8, -28).moveTo(23, -6).quadraticCurveTo(14, -10, 12, -20).moveTo(23, -14).quadraticCurveTo(30, -22, 28, -30);
-    g.moveTo(12, -19).lineTo(16, -26).moveTo(-28, 6).quadraticCurveTo(-20, 4, -17, -2);
-    g.stroke({ width: 1.3, color: dark, cap: 'round' });
+    // Limbs reach out and sag, split into thinner ones and end in hanging twigs.
+    const near = seeded(7);
+    for (const [x, y, deg, len, width] of [
+      [-26, -10, -40, 13, 1.7],
+      [-25, -22, -130, 10, 1.5],
+      [-28, 6, -25, 10, 1.3],
+      [-24.5, -37, -80, 8, 1.3],
+      [-25.5, -29, -20, 9, 1.2],
+      [23, -6, -145, 12, 1.6],
+      [23, -14, -50, 10, 1.4],
+      [22, -19, -105, 8, 1.2],
+      [24.5, 4, -160, 8, 1.1],
+    ] as const) {
+      limb(g, x, y, (deg * Math.PI) / 180, len, width, 3, dark, near);
+    }
     // Ripples and reflections.
     g.moveTo(-14, 30).lineTo(-6, 30).moveTo(6, 36).lineTo(14, 36).moveTo(-20, 39).lineTo(-12, 39);
     g.stroke({ width: 0.7, color: 0x1a181c, alpha: 0.6 });
