@@ -242,6 +242,18 @@ test('counter validation: non-Island lead, duplicated slot, unknown card', () =>
   g.expectError(1, { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'not-a-card', otherLand: 'island' });
 });
 
+test('a second Island can pay for a counter', () => {
+  const g = new Game(0);
+  g.claim('p1-slot-00', 'island');
+  g.claim('p1-slot-01', 'island');
+  g.play(0, 'p0-slot-00', 'island');
+
+  const offered = legalActions(g.s, 1, g.privOf(1)).filter((a) => a.type === 'counter' && a.otherLand === 'island');
+  assert.deepEqual(offered, [{ type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'p1-slot-01', otherLand: 'island' }]);
+  g.act(1, offered[0]!);
+  assert.deepEqual(g.s.players[1].graveyard.map((s) => s.id), ['p1-slot-00', 'p1-slot-01']);
+});
+
 test('the land being played cannot pay for a counter-counter', () => {
   const g = new Game(0);
   g.claim('p1-slot-00', 'island');
@@ -478,6 +490,29 @@ test('countering with a hidden Island while a public Island is in hand is illega
   g.act(1, { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'p1-slot-02', otherLand: 'mountain' });
   g.act(0, { type: 'allow' }); // odd -> countered
   assert.equal(g.s.winner, null);
+});
+
+test('a public Island and a hidden Island can pay for a counter together', () => {
+  const g = new Game(0);
+  const [islandDrawn0] = turnIsland(g, 0, 'p0-slot-00'); // t1 -> t2
+  g.claim('p1-slot-00', 'island');
+  g.claim('p0-slot-01', 'island');
+  g.claim('p0-slot-02', 'forest');
+  g.play(1, 'p1-slot-00', 'island'); // t2: p1 island
+  g.act(0, { type: 'counter', island: 'p0-slot-01', islandLand: 'island', other: 'p0-slot-02', otherLand: 'forest' });
+  g.act(1, { type: 'allow' }); // countered -> t3
+  g.grantDraw('island'); // t3 start draw for p0
+  g.act(0, { type: 'pass' }); // -> t4
+  g.grantDraw('forest'); // t4 draw for p1
+  g.play(1, 'p1-slot-01', 'forest', 'p1-slot-00'); // returns the island publicly into p1's hand
+  g.act(0, { type: 'allow' }); // -> t5
+  g.grantDraw('forest'); // t5 draw for p0
+  g.claim('p1-slot-05', 'island'); // p1's hidden island (their t2 start draw, never revealed)
+  g.play(0, islandDrawn0, 'island'); // t5: p0 island (their t1 island-draw card), p1 responds
+  const pair = { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'p1-slot-05', otherLand: 'island' } as const;
+  assert.ok(legalActions(g.s, 1, g.privOf(1)).some((a) => JSON.stringify(a) === JSON.stringify(pair)));
+  g.act(1, pair);
+  assert.equal(g.s.pending?.counters, 1);
 });
 
 // ---------------------------------------------------------------------------

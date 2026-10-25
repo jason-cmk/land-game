@@ -69,6 +69,7 @@ Each basic land triggers an effect when it is played.
 
 #### Island counter
 - When your opponent plays a land, you can discard an Island from your hand along with one other land to counter it.
+- The other land can be any land, including a second Island.
 - A countered land does not enter play, and its effect does not happen. It goes to its owner's graveyard, where a Forest can later return it.
 - Any land play can be countered, including an Island being played for its draw.
 - **Countering a counter:** the player whose land is being countered can respond with their own Island counter (Island plus one other land). This can go back and forth as long as players have the cards. Whoever makes the last counter wins the exchange. An odd number of counters means the land is countered. An even number means it resolves.

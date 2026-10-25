@@ -288,8 +288,10 @@ function applyCounter(state: GameState, seat: Seat, island: CardId, islandLand: 
   if (islandLand !== 'island') throw new IllegalActionError('the first counter card must be an Island');
   assertPublicLandMatches(islandSlot, islandLand, 'counter');
   assertPublicLandMatches(otherSlot, otherLand, 'counter');
-  spendKnownFirst(islandSlot, hand, islandLand);
-  spendKnownFirst(otherSlot, hand, otherLand);
+  // The pair leaves together, so each only has to spend known copies before
+  // the cards it leaves behind (a public Island may pay beside a hidden one).
+  spendKnownFirst(islandSlot, hand.filter((s) => s.id !== otherCard), islandLand);
+  spendKnownFirst(otherSlot, hand.filter((s) => s.id !== island), otherLand);
 
   return {
     ...moveTo(moveTo(state, seat, 'hand', 'graveyard', island, islandLand), seat, 'hand', 'graveyard', otherCard, otherLand),
@@ -470,9 +472,10 @@ export function legalActions(state: GameState, seat: Seat, priv?: ReadonlyMap<Ca
       const hand = state.players[seat].hand.filter((s) => s.id !== pending.card); // the played land is on the stack
       const island = pickSpendFirstSlot(hand, 'island', priv);
       if (island !== undefined) {
+        const rest = hand.filter((s) => s.id !== island); // so a second Island can pay
         for (const land of LANDS) {
-          const otherCard = pickSpendFirstSlot(hand, land, priv);
-          if (otherCard !== undefined && otherCard !== island) {
+          const otherCard = pickSpendFirstSlot(rest, land, priv);
+          if (otherCard !== undefined) {
             draft.push({ type: 'counter', island, islandLand: 'island', other: otherCard, otherLand: land });
           }
         }
