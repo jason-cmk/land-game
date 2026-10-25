@@ -98,7 +98,17 @@ const SCENES: Record<Land, (g: Graphics) => void> = {
     band(g, ART.y, 14, [[0, 0x6e6c74], [0.7, 0xb9b7be], [1, 0xd8d6dc]]);
     glow(g, 0, 8, 24, 20, 0xffffff, 0.9);
     band(g, 14, BOTTOM, [[0, 0x77757c], [1, 0x2c2a2f]]);
-    glow(g, 0, 24, 6, 18, 0xffffff, 0.6);
+    // The sun's path on the water: a wedge widening from the horizon, a smooth
+    // gradient brightest under the sun. The narrower layers stop shorter, so it
+    // fades towards us as well as out to its edges.
+    const steps = 16;
+    for (let i = 0; i < steps; i++) {
+      const k = 1 - i / steps;
+      const end = 14 + (BOTTOM - 14) * (1 - 0.45 * (i / steps));
+      const spread = (end - 14) / (BOTTOM - 14);
+      g.poly([-2.5 * k, 14, 2.5 * k, 14, (2.5 + 18 * spread) * k, end, -(2.5 + 18 * spread) * k, end]).fill({ color: 0xffffff, alpha: 0.045 });
+    }
+    glow(g, 0, 15, 14, 3, 0xffffff, 0.7);
     // Faint trees in the mist.
     for (const x of [-20, -7, 9, 21]) g.moveTo(x, 15).lineTo(x + 1, -30).moveTo(x + 0.6, -10).lineTo(x + 5, -17).moveTo(x + 0.8, -20).lineTo(x - 4, -26);
     g.stroke({ width: 0.9, color: 0x8a8790, alpha: 0.8 });
