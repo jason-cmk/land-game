@@ -375,78 +375,48 @@ button {
     font-size: 0.95rem;
   }
 
+  /* The choice buttons go below, sharing their line with the matching code. */
   #buttons {
     order: 2;
-    flex-basis: 100%;
+    flex: 1 1 calc(100% - 120px);
     min-height: 34px;
   }
 
-  #menu-toggle {
+  #history-toggle {
     align-self: flex-start;
   }
+
 }
 
-/* The menu (top right): History and the matching code. */
-#menu-toggle {
+#history-toggle {
   margin-left: auto;
-  padding: 7px 8px;
-  line-height: 0;
+  padding: 5px 9px;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
-#menu-toggle svg {
-  width: 18px;
-  height: 18px;
-}
-
-#menu-toggle[aria-expanded='true'] {
+#history-toggle[aria-expanded='true'] {
   border-color: var(--accent);
-  color: var(--ink);
 }
 
-#menu {
-  position: absolute;
-  z-index: 4;
-  top: 8px;
-  right: 12px;
-  width: min(300px, calc(100% - 24px));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  background: rgb(15 29 21 / 97%);
-  border: 1px solid #355a43;
-  border-radius: 10px;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
-}
-
-#menu > button {
-  width: 100%;
-  text-align: left;
-}
-
-#matching-row {
-  padding: 4px 6px;
-}
-
-#matching-row h3 {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
+/* The matching code: faint, out of the way in the bottom right corner (on phones, beside the choice buttons). */
 #matching {
-  margin: 6px 0 0;
-  font-size: 1.6rem;
+  position: fixed;
+  z-index: 1;
+  right: 10px;
+  bottom: 6px;
+  margin: 0;
+  font-size: 0.8rem;
   letter-spacing: 0.15em;
+  opacity: 0.5;
+  cursor: help;
 }
 
-#matching-row .hint {
-  margin: 6px 0 0;
-  font-size: 0.85rem;
-  line-height: 1.35;
+@media (max-width: 719px) {
+  #matching {
+    position: static;
+    order: 3;
+  }
 }
 
 #history {

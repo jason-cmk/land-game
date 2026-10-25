@@ -411,37 +411,15 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     }
   });
 
-  // Menu (top right): History, and the matching code when the link has one.
-  const menu = $('menu');
-  const menuToggle = $('menu-toggle');
-  const setMenuOpen = (open: boolean): void => {
-    menu.hidden = !open;
-    menuToggle.setAttribute('aria-expanded', String(open));
-  };
-  menuToggle.onclick = () => setMenuOpen(menu.hidden);
-  const closeMenuOutside = (event: PointerEvent): void => {
-    const target = event.target as Node;
-    if (!menu.hidden && !menu.contains(target) && !menuToggle.contains(target)) setMenuOpen(false);
-  };
-  document.addEventListener('pointerdown', closeMenuOutside);
-  cleanup.push(() => document.removeEventListener('pointerdown', closeMenuOutside));
-  onKey((event) => {
-    if (event.key === 'Escape') setMenuOpen(false);
-  });
-
-  // History: the match so far in words, rebuilt from the log while the panel is open.
+  // Battle log: the match so far in words, rebuilt from the log while the panel is open.
   const historyPanel = $('history');
   const historyToggle = $('history-toggle');
   const setHistoryOpen = (open: boolean): void => {
     historyPanel.hidden = !open;
     historyToggle.setAttribute('aria-expanded', String(open));
-    historyToggle.textContent = open ? 'Hide history' : 'History';
     if (open) renderHistory(true);
   };
-  historyToggle.onclick = () => {
-    setMenuOpen(false);
-    setHistoryOpen(historyPanel.hidden);
-  };
+  historyToggle.onclick = () => setHistoryOpen(historyPanel.hidden);
   $('history-close').onclick = () => setHistoryOpen(false);
   onKey((event) => {
     if (event.key === 'Escape' && !historyPanel.hidden) setHistoryOpen(false);
@@ -621,9 +599,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     }
     render();
   };
-  // Matching code (in the menu): both players should see the same symbols for their link.
+  // Matching code (faint, bottom right): both players should see the same symbols for their link.
   const matching = $('matching');
-  const matchingRow = $('matching-row');
   /** Listen to `next` instead of the current link (which is closed if still open). */
   let unhook: Array<() => void> = [];
   let offer: Rematch | null = null;
@@ -636,7 +613,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     offer = again === undefined ? rematch(next, () => (teardown(), play(next, snapshotKey, null, mode)), render) : null;
     if (previous !== next) previous.close();
     const session = next instanceof WebRtcTransport ? next.session : null;
-    matchingRow.hidden = session === null;
+    matching.hidden = session === null;
     if (session !== null) matching.textContent = matchingCode(session.offer, session.answer);
   };
   // Presence: cosmetic, best effort, never touches the coordinator.
@@ -686,7 +663,6 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     coordinator.detach();
     for (const off of [...unhook, ...cleanup]) off();
     stopRelink?.();
-    setMenuOpen(false);
     $('card-info').hidden = true;
     table.destroy();
   }
@@ -724,8 +700,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
         if (historyPanel.hidden) setHistoryOpen(true);
         return [...$('history-list').querySelectorAll('ul > li')].map((li) => li.textContent ?? '');
       },
-      /** The matching code in the menu, or null if this link has none. */
-      matchingCode: () => (matchingRow.hidden ? null : matching.textContent),
+      /** The matching code (bottom right), or null if this link has none. */
+      matchingCode: () => (matching.hidden ? null : matching.textContent),
       /** The card info panel's text, or null while it is hidden. */
       cardInfo: () => ($('card-info').hidden ? null : $('card-info').textContent),
       /** Simulate the network dropping (this end closes; the peer sees its channels close). */

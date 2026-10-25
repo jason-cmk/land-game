@@ -101,9 +101,12 @@
       <header id="bar">
         <span id="prompt" role="status"></span>
         <div id="buttons"></div>
-        <button id="menu-toggle" type="button" class="quiet" aria-controls="menu" aria-expanded="false" aria-label="Menu">
-          <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-        </button>
+        <button id="history-toggle" type="button" class="quiet" aria-controls="history" aria-expanded="false" title="Battle log" aria-label="Battle log">📜</button>
+        <p
+          id="matching"
+          title="Matching code: both screens should show these same symbols. If they differ, something between you and the other player could see your cards."
+          hidden
+        ></p>
       </header>
       <div id="table">
         <div id="card-info" role="tooltip" hidden></div>
@@ -112,21 +115,10 @@
           <p id="choice-text"></p>
           <div id="choice-buttons"></div>
         </section>
-        <nav id="menu" aria-label="Match menu" hidden>
-          <button id="history-toggle" type="button" class="quiet" aria-controls="history" aria-expanded="false">History</button>
-          <div id="matching-row" hidden>
-            <h3>Matching code</h3>
-            <p id="matching"></p>
-            <p class="hint">
-              Both screens should show these same four symbols. If they differ, something is sitting between you and the other player and could
-              see your cards: stop and start a new match.
-            </p>
-          </div>
-        </nav>
-        <section id="history" aria-label="Match history" hidden>
+        <section id="history" aria-label="Battle log" hidden>
           <header>
-            <h2>History</h2>
-            <button id="history-close" type="button" class="quiet" aria-label="Close history">✕</button>
+            <h2>Battle log</h2>
+            <button id="history-close" type="button" class="quiet" aria-label="Close battle log">✕</button>
           </header>
           <ol id="history-list"></ol>
         </section>
