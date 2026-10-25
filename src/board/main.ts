@@ -1,4 +1,4 @@
-// Board entry point: the lobby (the computer, two tabs, or online by room code
+// Board entry point: the lobby (the computer, two tabs in development, or online by room code
 // or copy-paste codes), the status bar, and the wiring from the coordinator to
 // the prompt and the table.
 
@@ -84,6 +84,8 @@ try {
   // storage unavailable: the rules simply start folded
 }
 
+// Two tabs is a development aid: the dev server shows it, the published page does not.
+if (import.meta.env.DEV) $('tabs').hidden = false;
 $('tabs-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const submitter = (event as SubmitEvent).submitter as HTMLButtonElement;
