@@ -2,10 +2,12 @@
 // shared state, its own private hand and its legal actions) it picks one action.
 // It never sees the opponent's hidden cards, because nothing passes them in.
 //
-// Version 1 is a small greedy scorer, not a search: play toward Domain or Mono,
-// knock back the opponent's progress, counter a land that would win (or a
-// costly one while the hand can spare two cards), and pay counters with the
-// least useful cards. Ties and near-ties break randomly so matches vary.
+// A small greedy scorer, not a search: play toward Domain or Mono, knock back
+// the opponent's progress, counter a land that would win (or a costly one
+// while the hand can spare two cards), and pay counters with the least useful
+// cards. Ties and near-ties break randomly so matches vary. The easy style
+// blurs the scores, spends its last Island freely and lets half the winning
+// lands through; the hard computer (search.ts) plays games out with this one.
 
 import { counterResponder } from '../engine/game.ts';
 import { LANDS, other } from '../engine/types.ts';
@@ -33,18 +35,44 @@ export function loss(battlefield: readonly CardSlot[], card: CardId): number {
 /** Hand size at which the computer counters a merely costly play, not just a winning one. */
 const SPARE_HAND = 6;
 
+export type Style = 'easy' | 'normal';
+
+interface Tuning {
+  /** Random spread added to every score: 0.5 only breaks ties, more makes mistakes. */
+  readonly noise: number;
+  /** Hold back the last Island in hand for countering. */
+  readonly keepIsland: boolean;
+  /** Counter costly plays as well as winning ones. */
+  readonly costlyCounters: boolean;
+  /** Chance of countering a land that would win. */
+  readonly winCounters: number;
+}
+
+const TUNING: Record<Style, Tuning> = {
+  easy: { noise: 12, keepIsland: false, costlyCounters: false, winCounters: 0.5 },
+  normal: { noise: 0.5, keepIsland: true, costlyCounters: true, winCounters: 1 },
+};
+
 /**
  * Pick one of `actions` for `seat`. `rand` returns [0, 1) and only breaks
  * ties, so a seeded one makes the choice reproducible.
  */
-export function chooseAction(state: GameState, seat: Seat, priv: ReadonlyMap<CardId, Land>, actions: readonly Action[], rand: () => number = Math.random): Action {
+export function chooseAction(
+  state: GameState,
+  seat: Seat,
+  priv: ReadonlyMap<CardId, Land>,
+  actions: readonly Action[],
+  rand: () => number = Math.random,
+  style: Style = 'normal',
+): Action {
   if (actions.length === 0) throw new Error('chooseAction needs at least one legal action');
   if (actions.length === 1) return actions[0]!;
-  const view = new View(state, seat, priv);
+  const tuning = TUNING[style];
+  const view = new View(state, seat, priv, tuning, tuning.winCounters >= 1 || rand() < tuning.winCounters);
   let best: Action = actions[0]!;
   let bestScore = -Infinity;
   for (const action of actions) {
-    const score = view.score(action) + rand() * 0.5;
+    const score = view.score(action) + rand() * tuning.noise;
     if (score > bestScore) {
       best = action;
       bestScore = score;
@@ -59,12 +87,17 @@ class View {
   private readonly seat: Seat;
   private readonly priv: ReadonlyMap<CardId, Land>;
   private readonly opponent: Seat;
+  private readonly tuning: Tuning;
+  /** Whether a winning land gets countered this time (always, except for the easy style). */
+  private readonly stopWins: boolean;
 
-  constructor(state: GameState, seat: Seat, priv: ReadonlyMap<CardId, Land>) {
+  constructor(state: GameState, seat: Seat, priv: ReadonlyMap<CardId, Land>, tuning: Tuning = TUNING.normal, stopWins = true) {
     this.state = state;
     this.seat = seat;
     this.priv = priv;
     this.opponent = other(seat);
+    this.tuning = tuning;
+    this.stopWins = stopWins;
   }
 
   score(action: Action): number {
@@ -113,7 +146,7 @@ class View {
     let score = 1 + 10 * gain(mine, land);
     // Keep the last Island for countering unless the play is worth more.
     const islands = this.state.players[this.seat].hand.filter((s) => this.ownLand(s) === 'island').length;
-    if (land === 'island' && islands === 1) score -= 2;
+    if (this.tuning.keepIsland && land === 'island' && islands === 1) score -= 2;
     return score + this.effectScore(land, target);
   }
 
@@ -154,8 +187,8 @@ class View {
     if (pending === null || counterResponder(pending) !== this.seat) return -1;
     const { wins, value } = this.stake();
     const handSize = this.state.players[this.seat].hand.length;
-    if (wins) return 100;
-    return handSize >= SPARE_HAND && value >= 2 ? value : -1;
+    if (wins) return this.stopWins ? 100 : -1;
+    return this.tuning.costlyCounters && handSize >= SPARE_HAND && value >= 2 ? value : -1;
   }
 
   /** Countering is worth what the play is, less the card it costs besides the Island. */

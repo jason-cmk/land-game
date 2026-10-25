@@ -31,20 +31,27 @@
       <section id="resume" hidden>
         <h2>Your online match is still going</h2>
         <p class="hint" id="resume-caption"></p>
-        <div id="resume-panel"></div>
+        <div id="resume-panel" class="stack"></div>
         <button id="abandon" type="button" class="quiet">Abandon it</button>
       </section>
 
       <section>
         <h2>Against the computer</h2>
-        <button id="computer" type="button">Play the computer</button>
-        <button id="computer-new" type="button" class="quiet" hidden>Start a new one</button>
-        <p class="hint" id="computer-hint">A practice match in this tab, against a simple opponent.</p>
+        <div class="row">
+          <div class="levels" role="radiogroup" aria-label="Difficulty">
+            <label><input type="radio" name="level" value="easy" />Easy</label>
+            <label><input type="radio" name="level" value="normal" checked />Normal</label>
+            <label><input type="radio" name="level" value="hard" />Hard</label>
+          </div>
+          <button id="computer" type="button">Play the computer</button>
+          <button id="computer-new" type="button" class="quiet" hidden>Start a new one</button>
+        </div>
+        <p class="hint" id="computer-hint">A practice match in this tab.</p>
       </section>
 
       <section id="tabs" hidden>
         <h2>Two tabs on this computer</h2>
-        <form id="tabs-form">
+        <form id="tabs-form" class="row">
           <label>Room <input id="room" value="table" autocomplete="off" /></label>
           <button type="submit" value="0">Take seat 1</button>
           <button type="submit" value="1">Take seat 2</button>
@@ -54,34 +61,36 @@
 
       <section>
         <h2>Online</h2>
-        <div id="rooms">
-          <button id="create-room" type="button">Create a room</button>
-          <form id="join-room-form" class="join-room">
-            <input id="room-code" placeholder="Room code" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code" />
-            <button type="submit">Join</button>
-          </form>
-          <div id="room-out" hidden>
+        <div id="rooms" class="stack">
+          <div class="row">
+            <button id="create-room" type="button">Create a room</button>
+            <form id="join-room-form" class="row">
+              <input id="room-code" placeholder="Room code" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code" />
+              <button type="submit">Join</button>
+            </form>
+          </div>
+          <div id="room-out" class="stack" hidden>
             <p>Your room code:</p>
             <p id="room-code-out" class="room-code"></p>
             <p class="hint">Tell it to the other player. The match starts when they join.</p>
           </div>
         </div>
-        <details id="manual-codes">
-        <summary>Use copy-paste codes instead</summary>
-        <button id="invite" type="button">Create an invite</button>
-        <div class="join">
-          <textarea id="invite-code" rows="3" placeholder="…or paste an invite code here"></textarea>
-          <button id="join" type="button">Join</button>
-        </div>
-        <div id="code-out" hidden>
-          <p id="code-caption"></p>
-          <textarea id="code" rows="4" readonly></textarea>
-          <button id="copy-code" type="button">Copy</button>
-        </div>
-        <div id="reply-row" hidden>
-          <textarea id="reply-code" rows="3" placeholder="Paste their reply code"></textarea>
-          <button id="accept" type="button">Connect</button>
-        </div>
+        <details id="manual-codes" class="stack">
+          <summary>Use copy-paste codes instead</summary>
+          <button id="invite" type="button">Create an invite</button>
+          <div class="stack">
+            <textarea id="invite-code" rows="3" placeholder="…or paste an invite code here"></textarea>
+            <button id="join" type="button">Join</button>
+          </div>
+          <div id="code-out" class="stack" hidden>
+            <p id="code-caption"></p>
+            <textarea id="code" rows="4" readonly></textarea>
+            <button id="copy-code" type="button">Copy</button>
+          </div>
+          <div id="reply-row" class="stack" hidden>
+            <textarea id="reply-code" rows="3" placeholder="Paste their reply code"></textarea>
+            <button id="accept" type="button">Connect</button>
+          </div>
         </details>
       </section>
 
@@ -92,8 +101,9 @@
       <header id="bar">
         <span id="prompt" role="status"></span>
         <div id="buttons"></div>
-        <button id="matching" type="button" class="quiet" aria-controls="matching-info" aria-expanded="false" hidden></button>
-        <button id="history-toggle" type="button" class="quiet" aria-controls="history" aria-expanded="false" title="History">📜</button>
+        <button id="menu-toggle" type="button" class="quiet" aria-controls="menu" aria-expanded="false" aria-label="Menu">
+          <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+        </button>
       </header>
       <div id="table">
         <div id="card-info" role="tooltip" hidden></div>
@@ -102,10 +112,17 @@
           <p id="choice-text"></p>
           <div id="choice-buttons"></div>
         </section>
-        <p id="matching-info" hidden>
-          Both screens should show these same four symbols. If they differ, something is sitting between you and the other player and could see
-          your cards: stop and start a new match.
-        </p>
+        <nav id="menu" aria-label="Match menu" hidden>
+          <button id="history-toggle" type="button" class="quiet" aria-controls="history" aria-expanded="false">History</button>
+          <div id="matching-row" hidden>
+            <h3>Matching code</h3>
+            <p id="matching"></p>
+            <p class="hint">
+              Both screens should show these same four symbols. If they differ, something is sitting between you and the other player and could
+              see your cards: stop and start a new match.
+            </p>
+          </div>
+        </nav>
         <section id="history" aria-label="Match history" hidden>
           <header>
             <h2>History</h2>
@@ -115,7 +132,7 @@
         </section>
         <section id="reconnect" hidden>
           <h2>The connection dropped</h2>
-          <div id="reconnect-panel"></div>
+          <div id="reconnect-panel" class="stack"></div>
         </section>
       </div>
     </section>

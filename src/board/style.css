@@ -12,6 +12,11 @@
   box-sizing: border-box;
 }
 
+/* hidden always wins, even over a class that sets display (a row, a stack). */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -31,6 +36,34 @@ body {
   border-radius: 10px;
   padding: 16px;
   margin-bottom: 16px;
+}
+
+/* One rhythm for the lobby and the code-swap panels: blocks stack 12px apart
+   (8px inside a stack), and controls side by side sit 8px apart. */
+#lobby section > *,
+#reconnect > *,
+.stack > * {
+  margin: 0;
+}
+
+#lobby section > * + *,
+#reconnect > * + * {
+  margin-top: 12px;
+}
+
+.stack > * + * {
+  margin-top: 8px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.row label {
+  margin: 0;
 }
 
 h1 {
@@ -58,10 +91,10 @@ textarea {
 }
 
 textarea {
+  display: block;
   width: 100%;
   font-family: ui-monospace, monospace;
   font-size: 12px;
-  margin: 8px 0;
   word-break: break-all;
 }
 
@@ -73,13 +106,51 @@ button {
   border-radius: 6px;
   padding: 7px 12px;
   cursor: pointer;
-  margin: 2px 4px 2px 0;
+  margin: 0;
 }
 
 button.quiet {
   background: transparent;
   color: var(--muted);
   border: 1px solid #355a43;
+}
+
+.levels {
+  display: inline-flex;
+  border: 1px solid #355a43;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.levels label {
+  margin: 0;
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.levels label + label {
+  border-left: 1px solid #355a43;
+}
+
+.levels input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.levels label:has(input:checked) {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+
+.levels label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+.levels:has(input:disabled) {
+  opacity: 0.5;
 }
 
 .hint,
@@ -112,6 +183,12 @@ button.quiet {
 
 #prompt {
   flex: 1 1 260px;
+}
+
+#buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 #table {
@@ -304,20 +381,72 @@ button {
     min-height: 34px;
   }
 
-  #history-toggle {
+  #menu-toggle {
     align-self: flex-start;
   }
 }
 
-#history-toggle {
+/* The menu (top right): History and the matching code. */
+#menu-toggle {
   margin-left: auto;
-  padding: 5px 9px;
-  font-size: 1.05rem;
-  line-height: 1;
+  padding: 7px 8px;
+  line-height: 0;
 }
 
-#history-toggle[aria-expanded='true'] {
+#menu-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+#menu-toggle[aria-expanded='true'] {
   border-color: var(--accent);
+  color: var(--ink);
+}
+
+#menu {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  right: 12px;
+  width: min(300px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: rgb(15 29 21 / 97%);
+  border: 1px solid #355a43;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+}
+
+#menu > button {
+  width: 100%;
+  text-align: left;
+}
+
+#matching-row {
+  padding: 4px 6px;
+}
+
+#matching-row h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+#matching {
+  margin: 6px 0 0;
+  font-size: 1.6rem;
+  letter-spacing: 0.15em;
+}
+
+#matching-row .hint {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
 }
 
 #history {
@@ -353,10 +482,6 @@ button {
 }
 
 #history h2 {
-  margin: 0;
-}
-
-#history-close {
   margin: 0;
 }
 
@@ -437,10 +562,8 @@ button {
 }
 
 /* Online lobby: room codes first, the copy-paste codes folded away below. */
-.join-room {
-  display: inline-flex;
-  gap: 4px;
-  margin: 2px 0;
+#room {
+  width: 8em;
 }
 
 #room-code {
@@ -451,16 +574,11 @@ button {
 }
 
 .room-code {
-  margin: 4px 0;
   font-family: ui-monospace, monospace;
   font-size: 2.4rem;
   font-weight: 700;
   letter-spacing: 0.25em;
   color: var(--accent);
-}
-
-#manual-codes {
-  margin-top: 12px;
 }
 
 #manual-codes summary,
@@ -469,59 +587,4 @@ button {
   cursor: pointer;
   color: var(--muted);
   font-size: 0.9rem;
-  margin: 8px 0;
-}
-
-/* The matching code: both players should see the same four symbols. */
-#matching {
-  margin-left: auto;
-  padding: 4px 8px;
-  font-size: 1rem;
-  letter-spacing: 0.1em;
-  line-height: 1;
-}
-
-#matching[hidden] {
-  display: none;
-}
-
-#matching:not([hidden]) + #history-toggle {
-  margin-left: 0;
-}
-
-#matching[aria-expanded='true'] {
-  border-color: var(--accent);
-}
-
-#matching-info {
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  right: 12px;
-  width: min(300px, calc(100% - 24px));
-  margin: 0;
-  padding: 10px 12px;
-  background: rgb(15 29 21 / 96%);
-  border: 1px solid #355a43;
-  border-radius: 8px;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
-  font-size: 0.9rem;
-  line-height: 1.35;
-}
-
-#matching-info[hidden] {
-  display: none;
-}
-
-@media (max-width: 719px) {
-  /* Below the prompt, at the end of the choice buttons' line (not a line of its own). */
-  #matching {
-    order: 3;
-    align-self: flex-start;
-    font-size: 0.85rem;
-  }
-
-  #bar:has(#matching:not([hidden])) #buttons {
-    flex-basis: calc(100% - 120px);
-  }
 }

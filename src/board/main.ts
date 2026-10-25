@@ -9,7 +9,8 @@ import { rematch } from '../match/rematch.ts';
 import type { Rematch } from '../match/rematch.ts';
 import { DEFAULT_PRIME } from '../match/sra.ts';
 import type { Action, CardId, GameState, Seat } from '../engine/types.ts';
-import { runBot } from '../bot/bot.ts';
+import { LEVELS, runBot } from '../bot/bot.ts';
+import type { Level } from '../bot/bot.ts';
 import { connectBroadcast } from '../transport/broadcast.ts';
 import { createMemoryPair, localPeer } from '../transport/memory.ts';
 import { WebRtcTransport, createInvite, joinInvite } from '../transport/webrtc.ts';
@@ -226,8 +227,30 @@ if (unfinished !== null && unfinishedId !== null) {
 // Against the computer: both seats run in this tab, the computer's coordinator
 // over an in-memory link. Each seat keeps its own snapshot, so a reload resumes.
 const COMPUTER_KEYS = ['land-game/snapshot/computer/you', 'land-game/snapshot/computer/bot'] as const;
+/** The level picked in the lobby, and the level of the match in progress (which a resume keeps). */
+const LEVEL_KEY = 'land-game:level';
+const MATCH_LEVEL_KEY = 'land-game/snapshot/computer/level';
+const isLevel = (value: unknown): value is Level => LEVELS.includes(value as Level);
 
-function playComputer(saved: readonly [Snapshot | null, Snapshot | null]): void {
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // storage unavailable: the choice lasts only for this page
+  }
+}
+
+function playComputer(saved: readonly [Snapshot | null, Snapshot | null], level: Level): void {
+  writeStored(MATCH_LEVEL_KEY, level);
   const [mine, theirs] = createMemoryPair<Message>();
   const persist = (snapshot: Snapshot): void => saveSnapshot(COMPUTER_KEYS[1], snapshot);
   const bot = saved[1] !== null ? MatchCoordinator.resume(saved[1], theirs, { persist }) : new MatchCoordinator({ seat: 1, prime: DEFAULT_PRIME, transport: theirs, persist });
@@ -242,29 +265,44 @@ function playComputer(saved: readonly [Snapshot | null, Snapshot | null]): void 
     stopBot();
     bot.detach();
     for (const key of COMPUTER_KEYS) saveSnapshot(key, null);
-    playComputer([null, null]);
+    playComputer([null, null], level);
   };
   const table = play(localPeer(mine, 0), COMPUTER_KEYS[0], saved[0], 'computer', again);
   // Wait for cards to come to rest, so each move can be seen landing before the next.
-  const stopBot = runBot(bot, { busy: () => table.settling() > 1 });
+  const stopBot = runBot(bot, { level, busy: () => table.settling() > 1 });
 }
 
 {
   const saved = [loadSnapshot(COMPUTER_KEYS[0]), loadSnapshot(COMPUTER_KEYS[1])] as const;
   let resumable = saved[0] !== null && saved[1] !== null;
+  const radios = [...document.querySelectorAll<HTMLInputElement>('input[name="level"]')];
+  const picked = (): Level => {
+    const value = radios.find((r) => r.checked)?.value;
+    return isLevel(value) ? value : 'normal';
+  };
+  const showLevel = (level: Level): void => {
+    for (const radio of radios) radio.checked = radio.value === level;
+  };
+  const stored = readStored(LEVEL_KEY);
+  const matchLevel = readStored(MATCH_LEVEL_KEY);
+  const resumeLevel: Level = isLevel(matchLevel) ? matchLevel : 'normal';
+  showLevel(isLevel(stored) ? stored : 'normal');
+  for (const radio of radios) {
+    radio.addEventListener('change', () => writeStored(LEVEL_KEY, picked()));
+  }
   if (resumable) {
     $('computer').textContent = 'Carry on';
-    $('computer-hint').textContent = `Your match against the computer is still going, ${saved[0]!.log.length - 1} moves in.`;
+    $('computer-hint').textContent = `Your ${resumeLevel} match against the computer is still going, ${saved[0]!.log.length - 1} moves in. A new one uses the level above.`;
     ($('computer-new') as HTMLElement).hidden = false;
   }
   const fresh = (): void => {
     for (const key of COMPUTER_KEYS) saveSnapshot(key, null);
-    playComputer([null, null]);
+    playComputer([null, null], picked());
   };
   $('computer').addEventListener('click', () => {
     if (!resumable) return fresh();
     try {
-      playComputer(saved);
+      playComputer(saved, resumeLevel);
     } catch (err) {
       // A snapshot that no longer replays (say, from an older version) cannot be carried on.
       for (const key of COMPUTER_KEYS) saveSnapshot(key, null);
@@ -373,15 +411,37 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     }
   });
 
+  // Menu (top right): History, and the matching code when the link has one.
+  const menu = $('menu');
+  const menuToggle = $('menu-toggle');
+  const setMenuOpen = (open: boolean): void => {
+    menu.hidden = !open;
+    menuToggle.setAttribute('aria-expanded', String(open));
+  };
+  menuToggle.onclick = () => setMenuOpen(menu.hidden);
+  const closeMenuOutside = (event: PointerEvent): void => {
+    const target = event.target as Node;
+    if (!menu.hidden && !menu.contains(target) && !menuToggle.contains(target)) setMenuOpen(false);
+  };
+  document.addEventListener('pointerdown', closeMenuOutside);
+  cleanup.push(() => document.removeEventListener('pointerdown', closeMenuOutside));
+  onKey((event) => {
+    if (event.key === 'Escape') setMenuOpen(false);
+  });
+
   // History: the match so far in words, rebuilt from the log while the panel is open.
   const historyPanel = $('history');
   const historyToggle = $('history-toggle');
   const setHistoryOpen = (open: boolean): void => {
     historyPanel.hidden = !open;
     historyToggle.setAttribute('aria-expanded', String(open));
+    historyToggle.textContent = open ? 'Hide history' : 'History';
     if (open) renderHistory(true);
   };
-  historyToggle.onclick = () => setHistoryOpen(historyPanel.hidden);
+  historyToggle.onclick = () => {
+    setMenuOpen(false);
+    setHistoryOpen(historyPanel.hidden);
+  };
   $('history-close').onclick = () => setHistoryOpen(false);
   onKey((event) => {
     if (event.key === 'Escape' && !historyPanel.hidden) setHistoryOpen(false);
@@ -561,17 +621,9 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     }
     render();
   };
-  // Matching code: both players should see the same symbols for their link.
+  // Matching code (in the menu): both players should see the same symbols for their link.
   const matching = $('matching');
-  const matchingInfo = $('matching-info');
-  const showMatching = (open: boolean): void => {
-    matchingInfo.hidden = !open;
-    matching.setAttribute('aria-expanded', String(open));
-  };
-  matching.onclick = () => showMatching(matchingInfo.hidden);
-  onKey((event) => {
-    if (event.key === 'Escape') showMatching(false);
-  });
+  const matchingRow = $('matching-row');
   /** Listen to `next` instead of the current link (which is closed if still open). */
   let unhook: Array<() => void> = [];
   let offer: Rematch | null = null;
@@ -584,11 +636,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     offer = again === undefined ? rematch(next, () => (teardown(), play(next, snapshotKey, null, mode)), render) : null;
     if (previous !== next) previous.close();
     const session = next instanceof WebRtcTransport ? next.session : null;
-    matching.hidden = session === null;
-    if (session !== null) {
-      matching.textContent = matchingCode(session.offer, session.answer);
-      matching.setAttribute('aria-label', `Matching code ${matching.textContent}: check the other player sees the same`);
-    }
+    matchingRow.hidden = session === null;
+    if (session !== null) matching.textContent = matchingCode(session.offer, session.answer);
   };
   // Presence: cosmetic, best effort, never touches the coordinator.
   let peerHover: Presence | null = null;
@@ -637,6 +686,7 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
     coordinator.detach();
     for (const off of [...unhook, ...cleanup]) off();
     stopRelink?.();
+    setMenuOpen(false);
     $('card-info').hidden = true;
     table.destroy();
   }
@@ -674,8 +724,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
         if (historyPanel.hidden) setHistoryOpen(true);
         return [...$('history-list').querySelectorAll('ul > li')].map((li) => li.textContent ?? '');
       },
-      /** The matching code in the status bar, or null if this link has none. */
-      matchingCode: () => (matching.hidden ? null : matching.textContent),
+      /** The matching code in the menu, or null if this link has none. */
+      matchingCode: () => (matchingRow.hidden ? null : matching.textContent),
       /** The card info panel's text, or null while it is hidden. */
       cardInfo: () => ($('card-info').hidden ? null : $('card-info').textContent),
       /** Simulate the network dropping (this end closes; the peer sees its channels close). */

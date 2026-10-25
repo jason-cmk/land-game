@@ -44,11 +44,11 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
   const make = el('button', { type: 'button', textContent: 'Make a reconnect code' });
   const theirs = area('…or paste their reconnect code here');
   const use = el('button', { type: 'button', textContent: 'Use their code' });
-  const out = el('div', { hidden: true });
+  const out = el('div', { hidden: true, className: 'stack' });
   const caption = el('p');
   const code = area('', true);
   const copy = el('button', { type: 'button', textContent: 'Copy', className: 'quiet' });
-  const replyRow = el('div', { hidden: true });
+  const replyRow = el('div', { hidden: true, className: 'stack' });
   const reply = area('Paste their reply code');
   const connect = el('button', { type: 'button', textContent: 'Connect' });
   out.append(caption, code, copy);
@@ -67,7 +67,7 @@ export function relinkPanel(host: HTMLElement, reconnect: Reconnect, onLink: (li
   if (courier === null) host.append(...manual, message);
   else {
     const auto = el('p', { textContent: 'Reconnecting… This happens on its own once the other player is back.' });
-    const fallback = el('details');
+    const fallback = el('details', { className: 'stack' });
     fallback.append(el('summary', { textContent: 'Not reconnecting? Swap codes instead' }), ...manual);
     host.append(auto, message, fallback);
     room = linkByRoom(courier, matchRoom(reconnect.match), reconnect.seat === 0 ? 'inviter' : 'joiner', { ...ICE, reconnect });

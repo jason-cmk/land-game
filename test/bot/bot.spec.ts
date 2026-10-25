@@ -94,3 +94,17 @@ test('the bot waits while the board is busy, then moves', async () => {
   busy = false;
   await until(() => coordinators[first].log.length > 1, 'the first move');
 });
+
+test('a hard bot plays a full match against a normal one', async () => {
+  const [t0, t1] = createMemoryPair<Message>();
+  const coordinators: Pair = [
+    new MatchCoordinator({ seat: 0, prime: DEFAULT_PRIME, transport: t0 }),
+    new MatchCoordinator({ seat: 1, prime: DEFAULT_PRIME, transport: t1 }),
+  ];
+  for (const c of coordinators) c.start();
+  runBot(coordinators[0], { thinkMs: 0, level: 'hard', rand: mulberry32(21) });
+  runBot(coordinators[1], { thinkMs: 0, level: 'normal', rand: mulberry32(22) });
+  await until(over(coordinators), 'the hard match to finish', 60_000);
+  assert.equal(coordinators[0].outcome?.kind, 'win', JSON.stringify(coordinators[0].outcome));
+  assert.deepEqual(coordinators[0].outcome, coordinators[1].outcome);
+});

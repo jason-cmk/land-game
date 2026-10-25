@@ -17,8 +17,10 @@ Anything in here can change. Anything that contradicts the spec is a bug in this
 ```
 board/       rendering, input, animation, presence      knows: bot, match, transport
    │
-bot/         the computer opponent: a policy, and a     knows: engine, match
-             runner driving one seat's coordinator
+bot/         the computer opponent: a greedy policy,    knows: engine, match
+             a playout search over a plaintext
+             simulator, and a runner driving one
+             seat's coordinator
    │
 match/       lockstep coordinator, Mental Poker crypto, action log, hashing
    │
