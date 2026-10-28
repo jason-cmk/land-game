@@ -79,7 +79,7 @@ interface GameState {
 
 - Card slot IDs are deterministic by seat and post-shuffle deck index: `p0-slot-00` through `p0-slot-49`.
 - `GameState` is immutable. Every action applied by both peers produces the exact same next `GameState`.
-- Whenever a card is needed in `phase: 'drawKey'` (start-of-turn draw, opening hand, or Island resolution), the non-drawing player must supply their per-card decryption key for that slot before play proceeds.
+- Whenever a card is needed in `phase: 'drawKey'` (start-of-turn draw, opening hand, or Plains resolution), the non-drawing player must supply their per-card decryption key for that slot before play proceeds.
 
 ### "Hand shuffle": spend known copies first
 
@@ -119,9 +119,9 @@ What is declared at announcement versus chosen at resolution is a rules requirem
 |---|---|---|
 | Mountain | the opponent's battlefield land to destroy | — |
 | Forest | the graveyard land to return | — |
-| Plains | — | opponent grants draw key (`grantDrawKey`) for the top card of library, as for Island |
+| Plains | — | opponent grants draw key (`grantDrawKey`) for the top card of library |
 | Swamp | — | first opponent runs `revealHandForSwamp`, then Swamp controller runs `resolveTarget` |
-| Island | — | opponent grants draw key (`grantDrawKey`) for the top card of library |
+| Island | — | — (no effect; the turn ends) |
 
 ### Actions and events
 

@@ -67,12 +67,10 @@ class Game {
 }
 
 /** Play one Island through an empty chain; ends with the next turn's start draw granted. */
-function turnIsland(g: Game, seat: Seat, card: CardId): [CardId, CardId] {
+function turnIsland(g: Game, seat: Seat, card: CardId): CardId {
   g.play(seat, card, 'island');
   g.act(other(seat), { type: 'allow' });
-  const islandDrawn = g.grantDraw('island'); // the island's draw for the acting player
-  const nextStart = g.grantDraw('island'); // start-of-turn draw for the next player
-  return [islandDrawn, nextStart];
+  return g.grantDraw('island'); // start-of-turn draw for the next player
 }
 
 /** Pass the current turn (start draw already granted). */
@@ -113,7 +111,7 @@ test('opening state: 45-card library, 5-card hand, turn 1 in main, everything hi
 // Island cycle and turn structure
 // ---------------------------------------------------------------------------
 
-test('island resolves after allow: battlefield, chained draw keys, next turn', () => {
+test('island resolves after allow: battlefield, next turn', () => {
   const g = new Game(0);
   turnIsland(g, 0, 'p0-slot-00');
 
@@ -123,33 +121,33 @@ test('island resolves after allow: battlefield, chained draw keys, next turn', (
   assert.equal(g.s.phase, 'main');
   assert.deepEqual(p0!.battlefield.map((s) => s.land), ['island']);
   assert.equal(p0!.hand.some((s) => s.id === 'p0-slot-00'), false);
-  // p0: opening 5 - 1 played + 1 island draw = 5
-  assert.equal(p0!.hand.length, 5);
+  // p0: opening 5 - 1 played; a played Island draws nothing
+  assert.equal(p0!.hand.length, 4);
   // p1: opening 5 + 1 start-of-turn draw = 6
   assert.equal(p1!.hand.length, 6);
   // drawn cards are still hidden in the shared state
-  assert.equal(g.s.players[0].hand[4]!.land, null);
+  assert.equal(g.s.players[1].hand[5]!.land, null);
 });
 
-test('turn 1 has no start-of-turn draw: after playing, only the island draw is pending', () => {
+test('a played island has no effect: the turn passes straight to the next start draw', () => {
   const g = new Game(0);
   g.play(0, 'p0-slot-00', 'island');
   g.act(1, { type: 'allow' });
 
-  // the island draw popped the top card into p0's hand already
-  assert.equal(g.s.players[0].hand.length, 5);
+  assert.equal(g.s.players[0].hand.length, 4);
   const draw = g.s.awaitingDraw!;
-  assert.equal(draw.seat, 0);
-  assert.equal(draw.purpose, 'effectDraw');
+  assert.equal(draw.seat, 1);
+  assert.equal(draw.purpose, 'turnStart');
+  assert.equal(g.s.turn, 2);
 });
 
 test('grantDrawKey by the drawer or for the wrong card is illegal', () => {
   const g = new Game(0);
   g.play(0, 'p0-slot-00', 'island');
   g.act(1, { type: 'allow' });
-  const draw = g.s.awaitingDraw!;
-  g.expectError(0, { type: 'grantDrawKey', card: draw.card });
-  g.expectError(1, { type: 'grantDrawKey', card: 'p1-slot-00' });
+  const draw = g.s.awaitingDraw!; // p1's start draw
+  g.expectError(1, { type: 'grantDrawKey', card: draw.card });
+  g.expectError(0, { type: 'grantDrawKey', card: 'p1-slot-00' });
 });
 
 test('allow by the wrong seat, and playing while not the active player, are illegal', () => {
@@ -202,12 +200,10 @@ test('two counters then allow: the play resolves', () => {
   assert.deepEqual(g.s.players[0].battlefield.map((s) => s.land), ['island']);
   assert.equal(g.s.players[0].graveyard.length, 2);
   assert.equal(g.s.players[1].graveyard.length, 2);
-  // the island draw is pending; the turn advances only once its key is granted
-  assert.equal(g.s.turn, 1);
+  // the island has no effect: p1's start draw is pending
+  assert.equal(g.s.turn, 2);
   assert.equal(g.s.phase, 'drawKey');
   g.grantDraw('island');
-  g.grantDraw('island');
-  assert.equal(g.s.turn, 2);
   assert.equal(g.s.activeSeat, 1);
 });
 
@@ -276,7 +272,6 @@ test('play during the respond chain, and cards not in hand, are illegal', () => 
   g.play(0, 'p0-slot-00', 'island');
   g.expectError(0, { type: 'play', card: 'p0-slot-01', land: 'island' });
   g.act(1, { type: 'allow' });
-  g.grantDraw();
   g.grantDraw(); // turn 2, p1 to act
   g.expectError(1, { type: 'play', card: 'p0-slot-02', land: 'island' }); // p0's card
   g.expectError(1, { type: 'play', card: 'p1-slot-40', land: 'island' }); // still in library
@@ -286,7 +281,7 @@ test('playing a card already played this turn is illegal (it left the hand)', ()
   const g = new Game(0);
   g.play(0, 'p0-slot-00', 'island');
   g.act(1, { type: 'allow' });
-  g.grantDraw('island'); // island draw for p0
+  g.grantDraw('island'); // t2 start draw for p1
   // p0's turn is over: they may not play again
   g.expectError(0, { type: 'play', card: 'p0-slot-01', land: 'island' });
 });
@@ -467,21 +462,21 @@ test('playing a hidden copy while a public copy of that land sits in hand is ill
 
 test('countering with a hidden Island while a public Island is in hand is illegal; the public copy is fine', () => {
   const g = new Game(0);
-  const [islandDrawn0] = turnIsland(g, 0, 'p0-slot-00'); // t1 -> t2
+  turnIsland(g, 0, 'p0-slot-00'); // t1 -> t2
   g.claim('p1-slot-00', 'island');
   g.claim('p0-slot-01', 'island');
   g.claim('p0-slot-02', 'forest');
   g.play(1, 'p1-slot-00', 'island'); // t2: p1 island
   g.act(0, { type: 'counter', island: 'p0-slot-01', islandLand: 'island', other: 'p0-slot-02', otherLand: 'forest' });
   g.act(1, { type: 'allow' }); // countered -> t3
-  g.grantDraw('island'); // t3 start draw for p0
+  const island0 = g.grantDraw('island'); // t3 start draw for p0
   g.act(0, { type: 'pass' }); // -> t4
   g.grantDraw('forest'); // t4 draw for p1
   g.play(1, 'p1-slot-01', 'forest', 'p1-slot-00'); // returns the island publicly into p1's hand
   g.act(0, { type: 'allow' }); // -> t5
   g.grantDraw('forest'); // t5 draw for p0
   g.claim('p1-slot-05', 'island'); // p1's hidden island (their t2 start draw, never revealed)
-  g.play(0, islandDrawn0, 'island'); // t5: p0 island (their t1 island-draw card), p1 responds
+  g.play(0, island0, 'island'); // t5: p0 island (their t3 start draw), p1 responds
   g.expectError(
     1,
     { type: 'counter', island: 'p1-slot-05', islandLand: 'island', other: 'p1-slot-02', otherLand: 'mountain' },
@@ -494,21 +489,21 @@ test('countering with a hidden Island while a public Island is in hand is illega
 
 test('a public Island and a hidden Island can pay for a counter together', () => {
   const g = new Game(0);
-  const [islandDrawn0] = turnIsland(g, 0, 'p0-slot-00'); // t1 -> t2
+  turnIsland(g, 0, 'p0-slot-00'); // t1 -> t2
   g.claim('p1-slot-00', 'island');
   g.claim('p0-slot-01', 'island');
   g.claim('p0-slot-02', 'forest');
   g.play(1, 'p1-slot-00', 'island'); // t2: p1 island
   g.act(0, { type: 'counter', island: 'p0-slot-01', islandLand: 'island', other: 'p0-slot-02', otherLand: 'forest' });
   g.act(1, { type: 'allow' }); // countered -> t3
-  g.grantDraw('island'); // t3 start draw for p0
+  const island0 = g.grantDraw('island'); // t3 start draw for p0
   g.act(0, { type: 'pass' }); // -> t4
   g.grantDraw('forest'); // t4 draw for p1
   g.play(1, 'p1-slot-01', 'forest', 'p1-slot-00'); // returns the island publicly into p1's hand
   g.act(0, { type: 'allow' }); // -> t5
   g.grantDraw('forest'); // t5 draw for p0
   g.claim('p1-slot-05', 'island'); // p1's hidden island (their t2 start draw, never revealed)
-  g.play(0, islandDrawn0, 'island'); // t5: p0 island (their t1 island-draw card), p1 responds
+  g.play(0, island0, 'island'); // t5: p0 island (their t3 start draw), p1 responds
   const pair = { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'p1-slot-05', otherLand: 'island' } as const;
   assert.ok(legalActions(g.s, 1, g.privOf(1)).some((a) => JSON.stringify(a) === JSON.stringify(pair)));
   g.act(1, pair);
@@ -617,7 +612,7 @@ test('a player required to draw from an empty deck loses at turn start', () => {
   assert.equal(total, 50);
 });
 
-test('playing an Island with an empty deck decks the Island player out on the spot', () => {
+test('playing an Island with an empty deck draws nothing, so its player is not decked', () => {
   const g = new Game(0);
   // drive until the start of a p1 turn where p1 just drew their last library card
   let guard = 0;
@@ -642,8 +637,9 @@ test('playing an Island with an empty deck decks the Island player out on the sp
   g.play(1, lastDrawn, 'island');
   g.act(0, { type: 'allow' });
 
-  assert.equal(g.s.phase, 'over');
-  assert.deepEqual(g.s.winner, { seat: 0, reason: 'decked' });
+  assert.equal(g.s.winner, null);
+  assert.equal(g.s.awaitingDraw?.seat, 0); // p0's start draw, from the one card they have left
+  assert.equal(g.s.awaitingDraw?.purpose, 'turnStart');
 });
 
 // ---------------------------------------------------------------------------
@@ -707,9 +703,9 @@ test('legalActions: drawKey grants, and respond offers allow plus counter drafts
   assert.deepEqual(counter, { type: 'counter', island: 'p1-slot-00', islandLand: 'island', other: 'p1-slot-01', otherLand: 'swamp' });
 
   g.act(1, { type: 'allow' });
-  // p0 drew the island, so p1 holds the other half of the lock and must grant
-  const grant = legalActions(g.s, 1);
+  // p1 draws to start turn 2, so p0 holds the other half of the lock and must grant
+  const grant = legalActions(g.s, 0);
   assert.deepEqual(grant, [{ type: 'grantDrawKey', card: g.s.awaitingDraw!.card }]);
-  const forDrawer = legalActions(g.s, 0);
+  const forDrawer = legalActions(g.s, 1);
   assert.deepEqual(forDrawer, []);
 });

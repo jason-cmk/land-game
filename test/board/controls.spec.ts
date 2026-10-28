@@ -23,14 +23,13 @@ test('waiting player gets a wait prompt; active player can pass or play', () => 
 
 test('a card with several declared targets moves to a declare prompt when picked', () => {
   let s = createGame(0);
-  // Seat 0 plays an Island; seat 1 allows; draws resolve; seat 1 plays a Forest and passes back.
+  // Seat 0 plays an Island; seat 1 allows and draws; seat 1 plays a Forest and passes back.
   s = act(s, 0, { type: 'play', card: 'p0-slot-00', land: 'island' });
   s = act(s, 1, { type: 'allow' });
-  s = act(s, 1, { type: 'grantDrawKey', card: 'p0-slot-05' });
   s = act(s, 0, { type: 'grantDrawKey', card: 'p1-slot-05' });
   s = act(s, 1, { type: 'play', card: 'p1-slot-00', land: 'forest' });
   s = act(s, 0, { type: 'allow' });
-  s = act(s, 1, { type: 'grantDrawKey', card: 'p0-slot-06' });
+  s = act(s, 1, { type: 'grantDrawKey', card: 'p0-slot-05' });
   // Seat 0 holds a Mountain: one target (the Forest) still means a targeted play.
   const priv = new Map<CardId, Land>([['p0-slot-01', 'mountain']]);
   const actions = legalActions(s, 0, priv);
@@ -41,8 +40,7 @@ test('a card with several declared targets moves to a declare prompt when picked
   s = act(s, 0, { type: 'grantDrawKey', card: 'p1-slot-06' });
   s = act(s, 1, { type: 'play', card: 'p1-slot-01', land: 'island' });
   s = act(s, 0, { type: 'allow' });
-  s = act(s, 0, { type: 'grantDrawKey', card: 'p1-slot-07' });
-  s = act(s, 1, { type: 'grantDrawKey', card: 'p0-slot-07' });
+  s = act(s, 1, { type: 'grantDrawKey', card: 'p0-slot-06' });
   const declare = promptFor(s, 0, legalActions(s, 0, priv), 'p0-slot-01');
   assert.equal(declare.kind, 'declare');
   assert.ok(declare.kind === 'declare');
@@ -82,17 +80,15 @@ test('dropping a dragged card: on the table plays it, on a target aims it, back 
   for (const [seat, action] of [
     [0, { type: 'play', card: 'p0-slot-00', land: 'island' }],
     [1, { type: 'allow' }],
-    [1, { type: 'grantDrawKey', card: 'p0-slot-05' }],
     [0, { type: 'grantDrawKey', card: 'p1-slot-05' }],
     [1, { type: 'play', card: 'p1-slot-00', land: 'forest' }],
     [0, { type: 'allow' }],
-    [1, { type: 'grantDrawKey', card: 'p0-slot-06' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-05' }],
     [0, { type: 'pass' }],
     [0, { type: 'grantDrawKey', card: 'p1-slot-06' }],
     [1, { type: 'play', card: 'p1-slot-01', land: 'island' }],
     [0, { type: 'allow' }],
-    [0, { type: 'grantDrawKey', card: 'p1-slot-07' }],
-    [1, { type: 'grantDrawKey', card: 'p0-slot-07' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-06' }],
   ] as const) s = act(s, seat, action);
   const priv = new Map<CardId, Land>([['p0-slot-01', 'mountain']]);
   const actions = legalActions(s, 0, priv);

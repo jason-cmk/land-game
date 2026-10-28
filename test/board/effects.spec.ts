@@ -22,21 +22,20 @@ function run(start: GameState, steps: ReadonlyArray<[Seat, Action]>): { state: G
 
 const kinds = (cues: readonly Cue[]): string[] => cues.map((c) => c.kind);
 
-/** Seat 0 resolves an Island (drawing), seat 1 starts turn 2 with a draw. */
+/** Seat 0 resolves an Island (no effect), seat 1 starts turn 2 with a draw. */
 const OPENING: ReadonlyArray<[Seat, Action]> = [
   [0, { type: 'play', card: 'p0-slot-00', land: 'island' }],
   [1, { type: 'allow' }],
-  [1, { type: 'grantDrawKey', card: 'p0-slot-05' }],
   [0, { type: 'grantDrawKey', card: 'p1-slot-05' }],
 ];
 
 test('play, resolve and the draws that follow', () => {
   const { cues } = run(createGame(0), OPENING);
   assert.deepEqual(cues[0], [{ kind: 'announce', card: 'p0-slot-00', land: 'island', seat: 0 }]);
-  assert.deepEqual(kinds(cues[1]!), ['draw', 'enter']);
   // The next turn's draw moves the card as the turn ends; granting its key moves nothing.
-  assert.deepEqual(cues[2], [{ kind: 'draw', card: 'p1-slot-05', seat: 1 }]);
-  assert.deepEqual(cues[3], []);
+  assert.deepEqual(cues[1]!.find((c) => c.kind === 'draw'), { kind: 'draw', card: 'p1-slot-05', seat: 1 });
+  assert.ok(cues[1]!.some((c) => c.kind === 'enter'));
+  assert.deepEqual(cues[2], []);
 });
 
 test('counter pays two cards; an odd chain counters the play', () => {
@@ -60,7 +59,7 @@ test('Mountain destroys with a meteor; Forest regrows; Swamp reveals then discar
 
   // Seat 0 draws, then Forest returns the destroyed Island.
   const forest = run(mountain.state, [
-    [1, { type: 'grantDrawKey', card: 'p0-slot-06' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-05' }],
     [0, { type: 'play', card: 'p0-slot-01', land: 'forest', declaredTarget: 'p0-slot-00' }],
     [1, { type: 'allow' }],
   ]);
@@ -84,7 +83,7 @@ test('a Plains is only announced; a win is its own cue', () => {
   const after = run(createGame(0), OPENING).state;
   const { cues } = run(after, [
     [1, { type: 'pass' }],
-    [1, { type: 'grantDrawKey', card: 'p0-slot-06' }],
+    [1, { type: 'grantDrawKey', card: 'p0-slot-05' }],
     [0, { type: 'play', card: 'p0-slot-01', land: 'plains' }],
     [1, { type: 'resign' }],
   ]);

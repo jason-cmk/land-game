@@ -155,6 +155,7 @@ class View {
     const opponent = this.state.players[this.opponent];
     switch (land) {
       case 'island':
+        return 0;
       case 'plains':
         return 3;
       case 'swamp':

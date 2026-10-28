@@ -64,14 +64,14 @@ Each basic land triggers an effect when it is played.
 | **Forest** | Regrowth | Choose a land in your graveyard and return it to your hand. |
 | **Swamp** | Thoughtseize | Look at your opponent's hand and choose a land from it for them to discard. |
 | **Mountain** | Stone Rain | Choose a land your opponent controls and destroy it. |
-| **Island** | Draw / Force of Will | **When played:** draw a card. **From hand (counter):** see below. |
+| **Island** | Force of Will | **When played:** no effect. **From hand (counter):** see below. |
 | **Plains** | Draw | Draw a card. |
 
 #### Island counter
 - When your opponent plays a land, you can discard an Island from your hand along with one other land to counter it.
 - The other land can be any land, including a second Island.
 - A countered land does not enter play, and its effect does not happen. It goes to its owner's graveyard, where a Forest can later return it.
-- Any land play can be countered, including an Island being played for its draw.
+- Any land play can be countered, including an Island being played.
 - **Countering a counter:** the player whose land is being countered can respond with their own Island counter (Island plus one other land). This can go back and forth as long as players have the cards. Whoever makes the last counter wins the exchange. An odd number of counters means the land is countered. An even number means it resolves.
 - **What can be countered:** only a land being played from hand, not the effect of a land already in play.
 
@@ -110,11 +110,12 @@ The Ultimate Guard article does not cover the rules below. They come from our de
 
 #### Running out of cards
 - If a player has to draw a card and their deck is empty, that player loses the game. This is the normal Magic rule, and it is what YesTCG uses in their rules. Robopenguins' version instead lets the game continue without drawing, but we are not using that.
-- The same applies to a card drawn by an effect, such as an Island or a Plains being played.
+- The same applies to a card drawn by an effect, such as a Plains being played.
 
 ### Historical and community variants (not in use)
 - Island used to be "Scry 2". It was dropped because it was too weak.
-- Plains used to have an Opt effect, then Cloudshift (reuse the effect of one of your other non-Plains lands). Since 2026-10-25 it simply draws a card, like an Island played for its draw.
+- Plains used to have an Opt effect, then Cloudshift (reuse the effect of one of your other non-Plains lands). Since 2026-10-25 it simply draws a card.
+- Island used to draw a card when played. Dropped on 2026-10-29: it made Plains strictly worse, since an Island drew the same card and could also counter.
 - Swamp is the most house-ruled card across playgroups (random discard, opponent chooses, or "Blackmail" where the opponent reveals 3 and you pick 1). We use the Ultimate Guard **Thoughtseize** rule (look at the opponent's full hand and choose 1 to discard) because it gives Swamp a strategic role scouting for Island counters, and the digital board tracks revealed cards automatically so it never slows the game down.
 
 ## Technical direction

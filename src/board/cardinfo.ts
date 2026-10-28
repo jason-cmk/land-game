@@ -14,7 +14,7 @@ export const CARD_INFO: Record<Land, CardInfo> = {
   island: {
     name: 'Island',
     lines: [
-      'When played: draw a card.',
+      'When played: no effect.',
       "From hand: when your opponent plays a land, discard this {island} and one other land to counter it. The player being countered can counter back the same way.",
     ],
   },

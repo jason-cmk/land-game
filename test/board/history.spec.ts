@@ -14,12 +14,11 @@ import type { CardId, Land, Seat } from '../../src/engine/types.ts';
 const start: HistoryStep = { seat: 0, action: { type: 'start', first: 0, decks: [[], []], openingKeys: [[], []] } };
 const reveal = (card: CardId, land: Land) => ({ card, land });
 
-/** Seat 0 plays Island and draws (which ends its turn); seat 1 Mountains it, seat 0 counters, it is countered. */
+/** Seat 0 plays Island (which ends its turn); seat 1 Mountains it, seat 0 counters, it is countered. */
 const LOG: HistoryStep[] = [
   start,
   { seat: 0, action: { type: 'play', reveal: reveal('p0-slot-00', 'island') } },
   { seat: 1, action: { type: 'allow' } },
-  { seat: 1, action: { type: 'grantDrawKey', card: 'p0-slot-05', key: '0' } },
   { seat: 0, action: { type: 'grantDrawKey', card: 'p1-slot-05', key: '0' } },
   { seat: 1, action: { type: 'play', reveal: reveal('p1-slot-00', 'mountain'), declaredTarget: 'p0-slot-00' } },
   { seat: 0, action: { type: 'counter', island: reveal('p0-slot-01', 'island'), other: reveal('p0-slot-02', 'forest') } },
@@ -34,19 +33,17 @@ test('the history reads from the viewer seat, naming only its own draws', () => 
     '1: You played {island}.',
     '1: They let it resolve.',
     '1: Your {island} entered play.',
-    '1: You drew {swamp}.',
     '2: They drew a card.',
     '2: They played {mountain}, aiming at your {island}.',
     '2: You countered with {island} + {forest}.',
     '2: They let it resolve.',
     '2: Their {mountain} was countered.',
-    '3: You drew a card.', // not yet unlocked for seat 0, so not named
+    '3: You drew {swamp}.',
   ]);
   assert.deepEqual(text(matchHistory(LOG, 1, () => 'plains')), [
     '1: They played {island}.',
     '1: You let it resolve.',
     '1: Their {island} entered play.',
-    '1: They drew a card.',
     '2: You drew {plains}.',
     '2: You played {mountain}, aiming at their {island}.',
     '2: They countered with {island} + {forest}.',

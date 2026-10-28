@@ -193,43 +193,40 @@ r.claim('p1-slot-04', 'forest');
 r.board();
 
 // --- t1 ----------------------------------------------------------------------
-header('t1  P0 opens with an Island; P1 lets it in');
+header('t1  P0 opens with an Island; P1 lets it in (a played Island has no effect)');
 r.act(0, { type: 'play', card: 'p0-slot-00', land: 'island' });
 r.act(1, { type: 'allow' });
-r.grant('island'); // island effect draw → p0-slot-05 (played back on t3)
-r.grant('island'); // t2 start draw    → p1-slot-05 (lost to the Swamp on t5)
 r.board();
 
 // --- t2: counter war, round one -----------------------------------------------
 header('t2  P1 plays an Island — P0 counters — P1 counters the counter');
+r.grant('island'); // t2 start draw → p1-slot-05 (lost to the Swamp on t5)
 r.act(1, { type: 'play', card: 'p1-slot-00', land: 'island' });
 r.act(0, { type: 'counter', island: 'p0-slot-01', islandLand: 'island', other: 'p0-slot-02', otherLand: 'swamp' });
 console.log(`  (responder is P${counterResponder(r.p0.pending!)} — the controller may counter the counter)`);
 r.act(1, { type: 'counter', island: 'p1-slot-01', islandLand: 'island', other: 'p1-slot-02', otherLand: 'mountain' });
 r.act(0, { type: 'allow' }); // two counters = even → the Island resolves
-r.grant('island'); // P1's island-effect draw → p1-slot-06 (played on t6)
-// the turn flips here: t3's start draw is P0's — granted in the t3 section below
 r.board();
 
 // --- t3 -------------------------------------------------------------------------
-header('t3  P0 rides their first draw: a second Island');
-r.grant('swamp'); // t3 start draw → p0-slot-06 (the coming Thoughtseize)
-r.act(0, { type: 'play', card: 'p0-slot-05', land: 'island' });
+header('t3  P0 plays the Plains to draw');
+r.grant('swamp'); // t3 start draw → p0-slot-05 (the coming Thoughtseize)
+r.act(0, { type: 'play', card: 'p0-slot-04', land: 'plains' });
 r.act(1, { type: 'allow' });
-r.grant('island'); // island draw → p0-slot-07 (banked for the counter war)
-r.grant('mountain'); // t4 start draw → p1-slot-07
+r.grant('island'); // plains draw → p0-slot-06 (banked for the counter war)
 r.board();
 
 // --- t4: mountain kill -------------------------------------------------------------
-header('t4  P1 finally acts: Mountain → destroys P0\u2019s first Island');
-r.act(1, { type: 'play', card: 'p1-slot-07', land: 'mountain', declaredTarget: 'p0-slot-00' });
+header('t4  P1 draws a Mountain → destroys P0\u2019s Island');
+r.grant('mountain'); // t4 start draw → p1-slot-06
+r.act(1, { type: 'play', card: 'p1-slot-06', land: 'mountain', declaredTarget: 'p0-slot-00' });
 r.act(0, { type: 'allow' });
 r.board();
 
 // --- t5: Thoughtseize ------------------------------------------------------------------
 header('t5  P0 plays the Swamp — full hand reveal, then pick the discard');
-r.grant('island'); // t5 start draw → p0-slot-08
-r.act(0, { type: 'play', card: 'p0-slot-06', land: 'swamp' });
+r.grant('island'); // t5 start draw → p0-slot-07
+r.act(0, { type: 'play', card: 'p0-slot-05', land: 'swamp' });
 r.act(1, { type: 'allow' });
 r.act(1, { type: 'revealHandForSwamp', cards: r.revealCardsFor(1) });
 console.log('  (P1\u2019s hand is now public to both peers — watch the board)');
@@ -238,62 +235,48 @@ r.act(0, { type: 'resolveTarget', target: 'p1-slot-05' }); // strip an Island fr
 r.board();
 
 // --- t6 -------------------------------------------------------------------------------
-header('t6  P1 starts the Island race with a publicly revealed Island');
-r.grant('mountain'); // t6 start draw → p1-slot-08 (banked: it pays for the t12 counter)
-r.act(1, { type: 'play', card: 'p1-slot-06', land: 'island' });
+header('t6  P1 rebuilds with a fresh Island');
+r.grant('island'); // t6 start draw → p1-slot-07
+r.act(1, { type: 'play', card: 'p1-slot-07', land: 'island' });
 r.act(0, { type: 'allow' });
-r.grant('island'); // island draw → p1-slot-09
 r.board();
 
-// --- t7/t8/t9/t10/t11: the parallel floods ----------------------------------------------
-header('t7–t11  Both players ride their draws; Islands pile up');
-r.grant('island'); // t7 start draw → p0-slot-09
-r.act(0, { type: 'play', card: 'p0-slot-08', land: 'island' });
+// --- t7: regrowth ------------------------------------------------------------------------
+header('t7  P0\u2019s Forest returns the destroyed Island — publicly');
+r.grant('island'); // t7 start draw → p0-slot-08
+r.act(0, { type: 'play', card: 'p0-slot-03', land: 'forest', declaredTarget: 'p0-slot-00' });
 r.act(1, { type: 'allow' });
-r.grant('island'); // island draw → p0-slot-10
-
-r.grant('forest'); // t8 start draw → p1-slot-10
-r.act(1, { type: 'play', card: 'p1-slot-09', land: 'island' });
-r.act(0, { type: 'allow' });
-r.grant('island'); // island draw → p1-slot-11
-
-r.grant('forest'); // t9 start draw → p0-slot-11
-r.act(0, { type: 'play', card: 'p0-slot-09', land: 'island' });
-r.act(1, { type: 'allow' });
-r.grant('plains'); // island draw → p0-slot-12
-
-r.grant('island'); // t10 start draw → p1-slot-12
-r.act(1, { type: 'play', card: 'p1-slot-11', land: 'island' });
-r.act(0, { type: 'allow' });
-r.grant('plains'); // island draw → p1-slot-13
-
-r.grant('island'); // t11 start draw → p0-slot-13
-r.act(0, { type: 'play', card: 'p0-slot-10', land: 'island' });
-r.act(1, { type: 'allow' });
-r.grant('plains'); // island draw → p0-slot-14
-
-console.log('  (P0 sits on four Islands + a Swamp; P1 also on four Islands)');
 r.board();
 
-// --- t12: counter war, round two -----------------------------------------------------------
-header('t12  P1\u2019s FIFTH Island hits the stack — P0 goes to war over it');
-r.grant('island'); // t12 start draw → p1-slot-14 (P1\u2019s last Island)
-r.act(1, { type: 'play', card: 'p1-slot-12', land: 'island' }); // would win next allow
-r.act(0, { type: 'counter', island: 'p0-slot-07', islandLand: 'island', other: 'p0-slot-03', otherLand: 'forest' });
-console.log('  (P1 still has a draw in hand — counters the counter)');
-r.act(1, { type: 'counter', island: 'p1-slot-14', islandLand: 'island', other: 'p1-slot-08', otherLand: 'mountain' });
-console.log('  (P0 can counter a counter, and does)');
-r.act(0, { type: 'counter', island: 'p0-slot-13', islandLand: 'island', other: 'p0-slot-04', otherLand: 'plains' });
-console.log('  (three counters in; responder is P1 again — no Islands left to pay with)');
-r.act(1, { type: 'allow' }); // odd → the fifth Island never enters play
+// --- t8/t9 -----------------------------------------------------------------------------------
+header('t8–t9  P1 stacks Islands; P0 must play the public Island first');
+r.grant('island'); // t8 start draw → p1-slot-08
+r.act(1, { type: 'play', card: 'p1-slot-08', land: 'island' });
+r.act(0, { type: 'allow' });
+
+r.grant('mountain'); // t9 start draw → p0-slot-09 (the last land P0 needs)
+r.act(0, { type: 'play', card: 'p0-slot-00', land: 'island' }); // spend known copies first: the regrown one
+console.log('  (P1 holds only Forests — no counter possible)');
+r.act(1, { type: 'allow' });
+console.log('  (P0 sits on Plains, Swamp, Forest, Island — one Mountain from Domain)');
 r.board();
 
-// --- t13: the win, checked before the effect -----------------------------------------------
-header('t13  P0\u2019s start draw is an Island — the FIFTH Island wins');
-r.grant('island'); // t13 start draw → p0-slot-15
-r.act(0, { type: 'play', card: 'p0-slot-15', land: 'island' });
-console.log('  (P1\u2019s hand: no Islands left to counter with)');
-r.act(1, { type: 'allow' }); // win is checked as the land enters, BEFORE its draw effect
+// --- t10 ---------------------------------------------------------------------------------------
+header('t10  P1 digs the Swamped Island back out to have a counter ready');
+r.grant('island'); // t10 start draw → p1-slot-09
+r.act(1, { type: 'play', card: 'p1-slot-03', land: 'forest', declaredTarget: 'p1-slot-05' });
+r.act(0, { type: 'allow' });
+r.board();
+
+// --- t11: counter war, round two; the win, checked before the effect ---------------------------
+header('t11  P0\u2019s Mountain would complete Domain — P1 goes to war over it');
+r.grant('plains'); // t11 start draw → p0-slot-10
+r.act(0, { type: 'play', card: 'p0-slot-09', land: 'mountain', declaredTarget: 'p1-slot-00' });
+r.act(1, { type: 'counter', island: 'p1-slot-05', islandLand: 'island', other: 'p1-slot-04', otherLand: 'forest' }); // the public Island must pay first
+console.log('  (P0 counters the counter, paying with two Islands)');
+r.act(0, { type: 'counter', island: 'p0-slot-06', islandLand: 'island', other: 'p0-slot-07', otherLand: 'island' });
+console.log('  (two counters in; P1 has one Island left — not enough to pay)');
+r.act(1, { type: 'allow' }); // even → the Mountain enters; the win is checked BEFORE its effect
 r.board();
 
 // --- wrap-up ----------------------------------------------------------------------------------

@@ -171,7 +171,7 @@ function endTurn(state: GameState): GameState {
   };
 }
 
-/** A draw inside a turn (Island or Plains resolution). Drawing from an empty deck loses. */
+/** A draw inside a turn (Plains resolution). Drawing from an empty deck loses. */
 function drawFor(state: GameState, seat: Seat, purpose: 'effectDraw'): GameState {
   const drawn = popTop(state, seat);
   if (drawn === null) {
@@ -327,7 +327,8 @@ function applyAllow(state: GameState, seat: Seat): GameState {
 function resolveEffect(state: GameState, pending: PendingPlay): GameState {
   const controller = pending.controller;
 
-  if (pending.land === 'island' || pending.land === 'plains') return drawFor(state, controller, 'effectDraw');
+  if (pending.land === 'island') return endTurn(state); // no effect when played: it counters from hand
+  if (pending.land === 'plains') return drawFor(state, controller, 'effectDraw');
 
   if (pending.land === 'mountain') {
     // Target was declared before the counter window; apply it now.
