@@ -20,7 +20,7 @@ import { pageCourier } from './courier.ts';
 import { freshRoom, linkByRoom, matchingCode, newRoomCode, parseRoomCode } from './rooms.ts';
 import type { RoomLink } from './rooms.ts';
 import type { PeerTransport, TransportStatus } from '../transport/types.ts';
-import { dropOutcome, promptFor } from './controls.ts';
+import { dropOutcome, hasTarget, promptFor } from './controls.ts';
 import { counterChain } from './chain.ts';
 import type { ChainStep } from './chain.ts';
 import { cuesBetween } from './effects.ts';
@@ -478,8 +478,8 @@ function play(firstLink: Link, snapshotKey: string, saved: Snapshot | null, mode
   table.onDragStart((id) => {
     dragging = id;
     const prompt = currentPrompt();
-    // A card with several targets starts targeting as it lifts, so the targets light up.
-    if (prompt?.kind === 'main' && (prompt.playable.get(id)?.length ?? 0) > 1) {
+    // A card with a target starts targeting as it lifts, so the targets light up (a lone one is snapped to).
+    if (prompt?.kind === 'main' && hasTarget(prompt.playable.get(id) ?? [])) {
       picked = id;
       render();
     }

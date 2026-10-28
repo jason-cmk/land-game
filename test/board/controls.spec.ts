@@ -30,11 +30,19 @@ test('a card with several declared targets moves to a declare prompt when picked
   s = act(s, 1, { type: 'play', card: 'p1-slot-00', land: 'forest' });
   s = act(s, 0, { type: 'allow' });
   s = act(s, 1, { type: 'grantDrawKey', card: 'p0-slot-05' });
-  // Seat 0 holds a Mountain: one target (the Forest) still means a targeted play.
+  // Seat 0 holds a Mountain: one target (the Forest). A click plays it at once;
+  // picked (as a drag does), it targets, and a drop anywhere on the table aims at that one.
   const priv = new Map<CardId, Land>([['p0-slot-01', 'mountain']]);
   const actions = legalActions(s, 0, priv);
+  const unpicked = promptFor(s, 0, actions);
+  assert.ok(unpicked.kind === 'main' && unpicked.playable.get('p0-slot-01')?.length === 1, 'one target: a click plays directly');
   const picked = promptFor(s, 0, actions, 'p0-slot-01');
-  assert.equal(picked.kind, 'main', 'one target: playable directly');
+  assert.ok(picked.kind === 'declare');
+  assert.deepEqual([...picked.targets.keys()], ['p1-slot-00']);
+  const atForest = { type: 'play', card: 'p0-slot-01', land: 'mountain', declaredTarget: 'p1-slot-00' };
+  assert.deepEqual(dropOutcome(picked, 'p0-slot-01', null, true), { kind: 'submit', action: atForest }, 'a lone target is snapped to');
+  assert.deepEqual(dropOutcome(picked, 'p0-slot-01', 'p0-slot-00', true), { kind: 'submit', action: atForest }, 'even over another card');
+  assert.deepEqual(dropOutcome(picked, 'p0-slot-01', null, false), { kind: 'cancel' }, 'back over the hand puts it back');
 
   s = act(s, 0, { type: 'pass' });
   s = act(s, 0, { type: 'grantDrawKey', card: 'p1-slot-06' });

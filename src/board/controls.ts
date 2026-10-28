@@ -17,6 +17,7 @@ export type Prompt =
   /**
    * Main phase. Clicking a card in `playable` either plays it at once (one
    * action) or starts targeting (several actions, one per declared target).
+   * Dragging a card with a declared target always targets, snapping to a lone one.
    */
   | { readonly kind: 'main'; readonly text: string; readonly playable: ReadonlyMap<CardId, readonly Action[]>; readonly buttons: readonly Choice[] }
   /** Main phase, a card is picked and needs its declared target: click one of `targets`. */
@@ -59,7 +60,7 @@ export function promptFor(state: GameState, seat: Seat, actions: readonly Action
       }
       const pass: Choice = { label: 'Pass turn', action: { type: 'pass' } };
       const options = picked === null ? undefined : playable.get(picked);
-      if (options !== undefined && options.length > 1) {
+      if (options !== undefined && hasTarget(options)) {
         const targets = new Map<CardId, Action>();
         for (const action of options) if (action.type === 'play' && action.declaredTarget !== undefined) targets.set(action.declaredTarget, action);
         const first = options[0]!;
@@ -84,6 +85,11 @@ export function promptFor(state: GameState, seat: Seat, actions: readonly Action
     default:
       return { kind: 'wait', text: waitingText(state, seat) };
   }
+}
+
+/** Whether a card's plays aim at something (a Mountain or Forest with a land to choose). */
+export function hasTarget(plays: readonly Action[]): boolean {
+  return plays.some((a) => a.type === 'play' && a.declaredTarget !== undefined);
 }
 
 function declareText(land: Land): string {
@@ -147,11 +153,12 @@ export type Drop = { readonly kind: 'submit'; readonly action: Action } | { read
 /**
  * Dropping `card` onto `over` (the card under the drop point, if any), on the
  * table (`onTable`) or back over the hand. A drop on a target plays at it; a
- * drop on the table plays a card with one option, or starts targeting.
+ * drop on the table plays a card with one option or a lone target, or starts targeting.
  */
 export function dropOutcome(prompt: Prompt | null, card: CardId, over: CardId | null, onTable: boolean): Drop {
   if (prompt?.kind === 'declare' && prompt.card === card) {
-    const action = over === null ? undefined : prompt.targets.get(over);
+    const lone = onTable && prompt.targets.size === 1 ? [...prompt.targets.values()][0] : undefined;
+    const action = (over === null ? undefined : prompt.targets.get(over)) ?? lone;
     if (action !== undefined) return { kind: 'submit', action };
     return onTable ? { kind: 'pick' } : { kind: 'cancel' };
   }

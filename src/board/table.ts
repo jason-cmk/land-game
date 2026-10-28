@@ -772,19 +772,22 @@ export class Table {
       const sprite = this.cards.get(id);
       return sprite?.target == null ? null : this.rest(sprite.target, sprite);
     };
-    const lockOn = (from: CardId, tip: { x: number; y: number }, valid: (id: CardId) => boolean): void => {
+    const lockOn = (from: CardId, tip: { x: number; y: number }, valid: (id: CardId) => boolean, lone: CardId | null = null): void => {
       const origin = restOf(from);
       if (origin === null) return void this.aim.clear();
       const under = this.cardUnder(tip, from);
-      const target = under !== null && valid(under) ? under : null;
+      // A lone target holds the arrow anywhere but back over the hand row, where a drop puts the card back.
+      const target = under !== null && valid(under) ? under : tip.y < (this.app.screen.height / 5) * 4 ? lone : null;
       const to = target === null ? tip : (restOf(target) ?? tip);
       const ring = target === null ? 0 : (BASE_W * (this.cards.get(target)?.target?.scale ?? scale)) * 0.62;
       drawAim(this.aim, origin, to, { locked: target !== null, scale, ring, dash });
     };
     const isTarget = (id: CardId): boolean => view?.highlights.get(id) === 'target';
-    if (this.press?.aiming && this.aimTip !== null) return lockOn(this.press.id, this.aimTip, isTarget);
+    const targets = view === null ? [] : [...view.highlights].filter(([, h]) => h === 'target');
+    const lone = targets.length === 1 ? targets[0]![0] : null;
+    if (this.press?.aiming && this.aimTip !== null) return lockOn(this.press.id, this.aimTip, isTarget, lone);
     const picked = view === null ? undefined : [...view.highlights].find(([, h]) => h === 'picked')?.[0];
-    if (picked !== undefined && this.press === null && this.pointer !== null && this.aimable(picked)) return lockOn(picked, this.pointer, isTarget);
+    if (picked !== undefined && this.press === null && this.pointer !== null && this.aimable(picked)) return lockOn(picked, this.pointer, isTarget, lone);
     const peer = this.peerDrag;
     if (peer?.aim && view !== null) {
       // Their legal targets are not ours to know; lock onto any public card on the table.
